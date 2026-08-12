@@ -1,0 +1,221 @@
+--- a/GrimTypes.h
++++ b/GrimTypes.h
+@@ -1,4 +1,8 @@
+ #pragma once
++#include <cstddef>   // offsetof
++#include "msvc_string.h"
++#include <atomic>
++#include <cstdint>
+ #include <string>
+ #include <vector>
+ #include "Exports.h"
+@@ -30,24 +34,29 @@
+ 		float a;
+ 	};
+ 
++	// The string members are MsvcInterop::String, not std::string. Grim Dawn is MSVC-built
++	// and writes/reads MSVC's std::basic_string layout, which libstdc++ does not share (see
++	// compat/msvc_string.h). Both are 32 bytes, so every documented offset below is
++	// unchanged -- var1 still lands at 0x160 -- but the field *contents* only make sense when
++	// interpreted with MSVC's layout.
+ 	struct ItemReplicaInfo
+ 	{
+ 		unsigned int id;
+-		std::basic_string<char, std::char_traits<char>, std::allocator<char> > baseRecord;
+-		std::basic_string<char, std::char_traits<char>, std::allocator<char> > prefixRecord;
+-		std::basic_string<char, std::char_traits<char>, std::allocator<char> > suffixRecord;
++		MsvcInterop::String baseRecord;
++		MsvcInterop::String prefixRecord;
++		MsvcInterop::String suffixRecord;
+ 		unsigned int seed;
+-		std::basic_string<char, std::char_traits<char>, std::allocator<char> > modifierRecord;
+-		std::basic_string<char, std::char_traits<char>, std::allocator<char> > materiaRecord;
+-		std::basic_string<char, std::char_traits<char>, std::allocator<char> > relicBonus;
++		MsvcInterop::String modifierRecord;
++		MsvcInterop::String materiaRecord;
++		MsvcInterop::String relicBonus;
+ 		unsigned int relicSeed;
+-		std::basic_string<char, std::char_traits<char>, std::allocator<char> > enchantmentRecord;
++		MsvcInterop::String enchantmentRecord;
+ 		unsigned int enchantmentLevel;
+ 		unsigned int enchantmentSeed;
+-		std::basic_string<char, std::char_traits<char>, std::allocator<char> > transmuteRecord;
++		MsvcInterop::String transmuteRecord;
+ 
+-		std::basic_string<char, std::char_traits<char>, std::allocator<char> > ascendant1;
+-		std::basic_string<char, std::char_traits<char>, std::allocator<char> > ascendant2;
++		MsvcInterop::String ascendant1;
++		MsvcInterop::String ascendant2;
+ 
+ 		unsigned int var1;              // offset 0x160
+ 		Vec3 velocity;                  // offset 0x164 (actually bool+pad, velocity.x/y)
+@@ -69,6 +78,16 @@
+ 		unsigned int unknownFoaField2;  // offset 0x188
+ 	};
+ 
++	// The offsets above are load-bearing: the game writes this struct directly, and
++	// upstream's comments record where each field must land. Swapping std::string for
++	// MsvcInterop::String preserves them only because both are 32 bytes -- assert it rather
++	// than trust it, because getting this wrong corrupts the game's heap silently.
++	static_assert(sizeof(MsvcInterop::String) == 32, "replica strings must stay 32 bytes");
++	static_assert(offsetof(ItemReplicaInfo, var1) == 0x160, "ItemReplicaInfo layout drifted");
++	static_assert(offsetof(ItemReplicaInfo, stackSize) == 0x178, "stackSize offset drifted");
++	static_assert(offsetof(ItemReplicaInfo, seedRerolls) == 0x17c, "seedRerolls offset drifted");
++	static_assert(offsetof(ItemReplicaInfo, unknownFoaField2) == 0x188, "FOA tail drifted");
++
+ 	// The game writes this struct for us (Item::GetItemReplicaInfo) and reads it back
+ 	// (Item::CreateItem), so the layout has to match the shipped Game.dll exactly. Get
+ 	// it wrong and the game runs off the end of our object. Verify against
+@@ -173,15 +192,23 @@
+ 	};
+ 
+ 	// If this changes, just look up the "GAME::GameTextLine::GameTextLine" export
++	// text is MsvcInterop::WString, not std::wstring: the game fills these in
++	// Item::GetUIDisplayText, so the contents follow MSVC's string layout. Both types are
++	// 32 bytes (asserted below), so sizeof(GameTextLine) and the vector stride are
++	// unchanged -- only the interpretation of the field differs.
+ 	struct GameTextLine
+ 	{
+ 		GameTextClass textClass;
+-		std::wstring text;
++		MsvcInterop::WString text;
+ 		bool needsProcessing;
+ 		GraphicsTexture* leadingIcon;
+ 		float _iconScale;
+ 	};
+ 
++	// The swap above is only layout-neutral while these agree.
++	static_assert(sizeof(MsvcInterop::WString) == sizeof(std::wstring),
++		"GameTextLine stride would change; the game's vector would be misread");
++
+ 	std::wstring Serialize(GAME::ItemReplicaInfo replica);
+ 	std::vector<std::string> GetNextLineAndSplitIntoTokens(std::istream& str);
+ 	GAME::ItemReplicaInfo* Deserialize(std::vector<std::string> tokens);
+@@ -195,47 +222,104 @@
+ 
+ 
+ typedef GAME::Item* (__fastcall* pCreateItem)(GAME::ItemReplicaInfo* info);
+-static auto fnCreateItem = pCreateItem(GetProcAddressOrLogToFile(L"game.dll", "?CreateItem@Item@GAME@@SAPEAV12@AEBUItemReplicaInfo@2@@Z"));
++
++// PORT FIX: lazy export binding.
++//
++// These were `static auto fnX = pX(GetProcAddressOrLogToFile(...))` at header scope, so
++// every translation unit resolved them during static initialisation -- before DllMain, and
++// before game.dll is necessarily loaded. On failure GetProcAddressOrLogToFile logs through
++// g_log, which may not be constructed yet (different translation unit, unspecified order).
++// That is undefined behaviour occurring before any log file exists.
++//
++// LazyExport defers the lookup to first use. The implicit conversion to the function
++// pointer type means call sites keep working verbatim: `fnX(args)` and `if (fnX)` both
++// behave exactly as before.
++// Thread safety matters here in a way it did not upstream. Upstream resolved these during
++// static initialisation, before any thread existed. Deferring to first use means several
++// threads (the game's render thread, the DLL's worker thread, the seed-info thread) can
++// reach the same accessor simultaneously -- which they do the first time the stash opens.
++//
++// A naive "if (!resolved) { resolved = true; fn = ...; }" publishes the flag before the
++// value, so a second thread can observe resolved == true while fn is still null and call
++// through a null pointer. That crashes the game.
++//
++// A single atomic with a sentinel avoids the ordering problem entirely: a thread either
++// sees UNRESOLVED and does the lookup, or sees a fully-written pointer. Two threads racing
++// may both resolve, which is harmless -- GetProcAddress is idempotent.
++template <class Fn>
++class LazyExport {
++public:
++	LazyExport(const wchar_t* dll, const char* name) : m_dll(dll), m_name(name) {}
++
++	Fn get() const {
++		void* cached = m_fn.load(std::memory_order_acquire);
++		if (cached == Unresolved()) {
++			cached = reinterpret_cast<void*>(GetProcAddressOrLogToFile(m_dll, const_cast<char*>(m_name)));
++			m_fn.store(cached, std::memory_order_release);
++		}
++		return reinterpret_cast<Fn>(cached);
++	}
++
++	operator Fn() const { return get(); }
++
++private:
++	// Distinct from nullptr, which is a legitimate "export is missing" result.
++	static void* Unresolved() { return reinterpret_cast<void*>(static_cast<intptr_t>(-1)); }
++
++	const wchar_t* m_dll;
++	const char* m_name;
++	mutable std::atomic<void*> m_fn{ reinterpret_cast<void*>(static_cast<intptr_t>(-1)) };
++};
++
++static LazyExport<pCreateItem> fnCreateItem(L"game.dll", "?CreateItem@Item@GAME@@SAPEAV12@AEBUItemReplicaInfo@2@@Z");
+ 
+ typedef GAME::ObjectManager* (__fastcall* pGetObjectManager)();
+-static auto fnGetObjectManager = pGetObjectManager(GetProcAddressOrLogToFile(L"engine.dll", "?Get@?$Singleton@VObjectManager@GAME@@@GAME@@SAPEAVObjectManager@2@XZ"));
++static LazyExport<pGetObjectManager> fnGetObjectManager(L"engine.dll", "?Get@?$Singleton@VObjectManager@GAME@@@GAME@@SAPEAVObjectManager@2@XZ");
+ 
+ typedef void(__fastcall* pDestroyObjectEx)(GAME::ObjectManager*, GAME::Object* object, const char* file, int line);
+-static auto fnDestroyObjectEx = pDestroyObjectEx(GetProcAddressOrLogToFile(L"engine.dll","?DestroyObjectEx@ObjectManager@GAME@@QEAAXPEAVObject@2@PEBDH@Z"));
++static LazyExport<pDestroyObjectEx> fnDestroyObjectEx(L"engine.dll", "?DestroyObjectEx@ObjectManager@GAME@@QEAAXPEAVObject@2@PEBDH@Z");
+ 
+ //typedef void(__fastcall* pItemEquipmentGetUIDisplayText)(GAME::ItemEquipment*, GAME::Character* myCharacter, std::vector<GAME::GameTextLine>* text);
+-//static auto fnItemEquipmentGetUIDisplayText = pItemEquipmentGetUIDisplayText(GetProcAddressOrLogToFile(L"game.dll", "?GetUIDisplayText@ItemEquipment@GAME@@UEBAXPEBVCharacter@2@AEAV?$vector@UGameTextLine@GAME@@@mem@@_N@Z"));
+-static auto fnItemGetItemReplicaInfo = ItemGetItemReplicaInfo(GetProcAddressOrLogToFile(L"game.dll", GET_ITEM_REPLICAINFO));
++//static LazyExport<pItemEquipmentGetUIDisplayText> fnItemEquipmentGetUIDisplayText(L"game.dll", "?GetUIDisplayText@ItemEquipment@GAME@@UEBAXPEBVCharacter@2@AEAV?$vector@UGameTextLine@GAME@@@mem@@_N@Z");
++static LazyExport<ItemGetItemReplicaInfo> fnItemGetItemReplicaInfo(L"game.dll", GET_ITEM_REPLICAINFO);
+ 
+ typedef GAME::Player* (__fastcall* pGetMainPlayer)(GAME::GameEngine*);
+-static auto fnGetMainPlayer = pGetMainPlayer(GetProcAddressOrLogToFile(L"game.dll", "?GetMainPlayer@GameEngine@GAME@@QEBAPEAVPlayer@2@XZ"));
++static LazyExport<pGetMainPlayer> fnGetMainPlayer(L"game.dll", "?GetMainPlayer@GameEngine@GAME@@QEBAPEAVPlayer@2@XZ");
+ 
+ 
+-typedef void(__fastcall* pGetModNameArg)(GAME::GameInfo* gi, std::wstring* str);
+-static auto fnGetModNameArg = pGetModNameArg(GetProcAddressOrLogToFile(L"engine.dll", "?GetModName@GameInfo@GAME@@QEAAXAEAV?$basic_string@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@@Z"));
++// The parameter is MSVC's std::basic_string, which is NOT layout-compatible with
++// libstdc++'s. Typed as void* so it cannot be passed one by accident; callers must go
++// through MsvcInterop (see compat/msvc_string.h).
++typedef void(__fastcall* pGetModNameArg)(GAME::GameInfo* gi, void* msvcWideString);
++static LazyExport<pGetModNameArg> fnGetModNameArg(L"engine.dll", "?GetModName@GameInfo@GAME@@QEAAXAEAV?$basic_string@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@@Z");
+ 
+ 
+ typedef int(__fastcall* pGetGameInfoMode)(GAME::GameInfo* gi);
+-static auto fnGetGameInfoMode = pGetGameInfoMode(GetProcAddressOrLogToFile(L"engine.dll", "?GetMode@GameInfo@GAME@@QEBAIXZ"));
++static LazyExport<pGetGameInfoMode> fnGetGameInfoMode(L"engine.dll", "?GetMode@GameInfo@GAME@@QEBAIXZ");
+ 
+ //typedef std::wstring const& (__fastcall* pGetModName)(GAME::GameInfo* gi);
+-//static auto fnGetModName = pGetModName(GetProcAddressOrLogToFile(L"engine.dll", "?GetModName@GameInfo@GAME@@QEBAAEBV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@XZ"));
++//static LazyExport<pGetModName> fnGetModName(L"engine.dll", "?GetModName@GameInfo@GAME@@QEBAAEBV?$basic_string@DU?$char_traits@D@std@@V?$allocator@D@2@@std@@XZ");
+ 
+ 
+ typedef GAME::GameInfo* (__fastcall* pGetGameInfo)(GAME::Engine* ge);
+-static auto fnGetGameInfo = pGetGameInfo(GetProcAddressOrLogToFile(L"engine.dll", "?GetGameInfo@Engine@GAME@@QEAAPEAVGameInfo@2@XZ"));
++static LazyExport<pGetGameInfo> fnGetGameInfo(L"engine.dll", "?GetGameInfo@Engine@GAME@@QEAAPEAVGameInfo@2@XZ");
+ 
+ typedef GAME::GameInfo* (__fastcall* pPlayDropSound)(GAME::Item* ge);
+-static auto fnPlayDropSound = pPlayDropSound(GetProcAddressOrLogToFile(L"game.dll", "?PlayDropSound@Item@GAME@@UEAAXXZ"));
++static LazyExport<pPlayDropSound> fnPlayDropSound(L"game.dll", "?PlayDropSound@Item@GAME@@UEAAXXZ");
+ 
+-typedef GAME::GameInfo* (__fastcall* pShowCinematicText)(GAME::Engine* engine, const std::wstring* header, const std::wstring* content, int CinematicTextType, GAME::Color* color, bool whateverThisIsIfTrueItCrashes);
+-static auto fnShowCinematicText = pShowCinematicText(GetProcAddressOrLogToFile(L"engine.dll", "?ShowCinematicText@Engine@GAME@@QEAAXAEBV?$basic_string@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@0W4CinematicTextType@2@AEBVColor@2@_N@Z"));
++// header/content are MSVC std::basic_string const&, not libstdc++ strings.
++typedef GAME::GameInfo* (__fastcall* pShowCinematicText)(GAME::Engine* engine, const void* msvcHeader, const void* msvcContent, int CinematicTextType, GAME::Color* color, bool whateverThisIsIfTrueItCrashes);
++static LazyExport<pShowCinematicText> fnShowCinematicText(L"engine.dll", "?ShowCinematicText@Engine@GAME@@QEAAXAEBV?$basic_string@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@0W4CinematicTextType@2@AEBVColor@2@_N@Z");
+ // New: ?ShowCinematicText@Engine@GAME@@QEAAXAEBV?$basic_string@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@0W4CinematicTextType@2@AEBVColor@2@_N@Z
+ // Old: ?ShowCinematicText@Engine@GAME@@QEAAXAEBV?$basic_string@GU?$char_traits@G@std@@V?$allocator@G@2@@std@@0W4CinematicTextType@2@AEBVColor@2@@Z
+ 
+ typedef bool(__thiscall* IsGameLoadingPtr)(void* This);
+ typedef bool(__thiscall* IsGameWaitingPtr)(void* This, bool completelyUnknownWhatDoesThisDo);
+ typedef bool(__thiscall* SortInventorySackPtr)(void* This, int);
++// Resolves the four pointers below. Must run before they are used; called from
++// ProcessAttach, once game.dll is known to be loaded.
++void ResolveGameExports();
++
+ extern IsGameLoadingPtr IsGameLoading;
+ extern IsGameLoadingPtr IsGameEngineOnline;
+ extern IsGameWaitingPtr IsGameWaiting;
+@@ -249,7 +333,7 @@
+ 
+ 
+ typedef void* (__fastcall* pGetPlayerTransfer)(GAME::GameEngine*);
+-static auto fnGetPlayerTransfer = pGetPlayerTransfer(GetProcAddressOrLogToFile(L"game.dll", "?GetPlayerTransfer@GameEngine@GAME@@QEAAAEAV?$vector@PEAVInventorySack@GAME@@@mem@@XZ"));
++static LazyExport<pGetPlayerTransfer> fnGetPlayerTransfer(L"game.dll", "?GetPlayerTransfer@GameEngine@GAME@@QEAAAEAV?$vector@PEAVInventorySack@GAME@@@mem@@XZ");
+ 
+ 
+ 

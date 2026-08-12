@@ -1,0 +1,14 @@
+--- a/stdafx.h
++++ b/stdafx.h
+@@ -9,6 +9,7 @@
+ #define WIN32_LEAN_AND_MEAN		// Exclude rarely-used stuff from Windows headers
+ // Windows Header Files:
+ #include <windows.h>
+-#include <atlbase.h>
++// atlbase.h removed: MinGW has no ATL, and no ATL type was ever used here.
+ 
+-#include <codecvt> // wstring_convert
+\ No newline at end of file
++#include <tchar.h>   // _T
++#include "utf8_compat.h"   // replaces the removed <codecvt>
+\ No newline at end of file

@@ -1,0 +1,44 @@
+--- a/SettingsReader.cpp
++++ b/SettingsReader.cpp
+@@ -1,3 +1,5 @@
++#include <filesystem>
++#include <fstream>
+ #include "SettingsReader.h"
+ #include <boost/property_tree/ptree.hpp>                                        
+ #include <boost/property_tree/json_parser.hpp>       
+@@ -12,7 +14,7 @@
+ 	boost::property_tree::wptree loadPtreeRoot;
+ 
+ 	const auto settingsJson = GetIagdFolder() + L"settings.json";
+-	std::wifstream json(settingsJson);
++	std::wifstream json{std::filesystem::path(settingsJson)};
+ 
+ 	boost::property_tree::read_json(json, loadPtreeRoot);
+ 	auto child = loadPtreeRoot.get_child_optional(L"local.stashToLootFrom");
+@@ -40,7 +42,7 @@
+ 	boost::property_tree::wptree loadPtreeRoot;
+ 
+ 	const auto settingsJson = GetIagdFolder() + L"settings.json";
+-	std::wifstream json(settingsJson);
++	std::wifstream json{std::filesystem::path(settingsJson)};
+ 
+ 	boost::property_tree::read_json(json, loadPtreeRoot);
+ 	auto child = loadPtreeRoot.get_child_optional(L"local.stashToDepositTo");
+@@ -71,7 +73,7 @@
+ 	boost::property_tree::wptree loadPtreeRoot;
+ 
+ 	const auto settingsJson = GetIagdFolder() + L"settings.json";
+-	std::wifstream json(settingsJson);
++	std::wifstream json{std::filesystem::path(settingsJson)};
+ 
+ 
+ 	boost::property_tree::read_json(json, loadPtreeRoot);
+@@ -92,7 +94,7 @@
+ 	boost::property_tree::wptree loadPtreeRoot;
+ 
+ 	const auto settingsJson = GetIagdFolder() + L"settings.json";
+-	std::wifstream json(settingsJson);
++	std::wifstream json{std::filesystem::path(settingsJson)};
+ 
+ 	boost::property_tree::read_json(json, loadPtreeRoot);
+ 	auto child = loadPtreeRoot.get_child_optional(L"persistent.isRunningInWine");

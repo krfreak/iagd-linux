@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>IAGrim.Core</RootNamespace>
+  </PropertyGroup>
+
+  <!--
+    Upstream projects are referenced, not forked: they are already clean on Linux (verified
+    building against net10.0) and they are where Grim Dawn format changes land, so tracking
+    upstream keeps that for free.
+
+    The one exception is Parser/Arc/DDSImageReader.cs, which needs System.Drawing and throws
+    on Linux. Its replacement lives in Imaging/ here; the upstream copy still compiles as
+    part of Parser but is never called.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="../../../iagd/Parser/Parser.csproj" />
+    <ProjectReference Include="../../../iagd/StatTranslator/StatTranslator.csproj" />
+    <ProjectReference Include="../../../iagd/DataAccess/DataAccess.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../IAGrim.Platform/IAGrim.Platform.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="log4net" Version="3.3.0" />
+    <!-- Core stores game data beside the collection; same SQLite provider as Platform. -->
+    <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="10.0.8" />
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../../iagd/EvilsoftCommons/EvilsoftCommons.csproj" />
+  </ItemGroup>
+
+</Project>

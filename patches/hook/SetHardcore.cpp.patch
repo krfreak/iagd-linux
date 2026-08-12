@@ -1,0 +1,20 @@
+--- a/SetHardcore.cpp
++++ b/SetHardcore.cpp
+@@ -6,7 +6,7 @@
+ #include "SetHardcore.h"
+ #include "Exports.h"
+ #include "Logger.h"
+-#include <codecvt> // wstring_convert
++#include "utf8_compat.h"  // <codecvt> removed in GCC 16
+ 
+ SetHardcore* SetHardcore::g_self;
+ 
+@@ -39,7 +39,7 @@
+ 		g_self->TransferData(sizeof(isHardcore), (char*)&isHardcore);
+ 	}
+ 	catch (std::exception& ex) {
+-		std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
++		Utf8Compat::Converter converter;
+ 		std::wstring wide = converter.from_bytes(ex.what());
+ 		LogToFile(LogLevel::FATAL, L"Error parsing in SetHardcore.. " + wide);
+ 	}

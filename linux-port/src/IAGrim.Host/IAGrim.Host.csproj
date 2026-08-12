@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>IAGrim.Host</RootNamespace>
+    <AssemblyName>iagd-host</AssemblyName>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <!--
+    Built on System.Net.HttpListener rather than ASP.NET Core / Kestrel.
+
+    The API is five endpoints and one WebSocket, and HttpListener handles both on the base
+    runtime (verified on Linux, including the WebSocket upgrade). That avoids requiring the
+    ASP.NET Core runtime as a separate install, and keeps the eventual Flatpak/AppImage down
+    to the base runtime. If this ever grows into something that wants routing, auth or
+    middleware, Kestrel is the right answer instead.
+  -->
+
+  <!-- The built web UI (vite writes here); shipped alongside the host. -->
+  <ItemGroup>
+    <Content Include="wwwroot/**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../IAGrim.Platform/IAGrim.Platform.csproj" />
+    <ProjectReference Include="../IAGrim.Core/IAGrim.Core.csproj" />
+  </ItemGroup>
+
+</Project>

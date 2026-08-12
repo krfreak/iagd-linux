@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>IAGrim.Platform</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      Microsoft.Data.Sqlite pulls SQLitePCLRaw.lib.e_sqlite3 2.1.11, which carries a known
+      high-severity advisory (GHSA-2m69-gcr7-jv3q). Use the Core package plus an explicit
+      current bundle instead - the same combination upstream's IAGrim.csproj uses.
+    -->
+    <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="10.0.8" />
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3" />
+  </ItemGroup>
+
+  <!--
+    Replaces upstream's IAGrim/Utilities: GlobalPaths (Windows AppData), GrimDawnDetector
+    (registry), RegistryHelper and DependencyChecker. Nothing here touches a Windows API;
+    Steam and Proton are discovered by reading files.
+  -->
+
+</Project>

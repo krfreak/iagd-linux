@@ -1,0 +1,350 @@
+--- a/InventorySack_AddItem.cpp
++++ b/InventorySack_AddItem.cpp
+@@ -1,10 +1,13 @@
++#include <algorithm>
++#include <filesystem>
++#include <fstream>
+ #include "stdafx.h"
+ #include <stdlib.h>
+ #include "MessageType.h"
+ #include <detours.h>
+ #include "InventorySack_AddItem.h"
+ 
+-#include <codecvt>
++#include "utf8_compat.h"  // <codecvt> removed in GCC 16
+ 
+ #include "Exports.h"
+ #include <random>
+@@ -178,7 +181,7 @@
+ 		SetEvent(m_hEvent);
+ 	}
+ 	catch (std::exception& ex) {
+-		std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
++		Utf8Compat::Converter converter;
+ 		std::wstring wide = converter.from_bytes(ex.what());
+ 		LogToFile(LogLevel::FATAL, L"Error parsing in InventorySack_AddItem::Hooked_GameInfo_GameInfo_Param.. " + wide);
+ 	}
+@@ -200,14 +203,20 @@
+ /// <param name="SkipPlaySound"></param>
+ /// <returns></returns>
+ void* __fastcall InventorySack_AddItem::Hooked_InventorySack_AddItem_Drop(void* This, GAME::Item *item, bool findPosition, bool SkipPlaySound) {
++#ifdef IAGD_TRACE_HOOKS
++	LogToFile(LogLevel::WARNING, L"TRACE AddItem_Drop: entered");
++#endif
+ 	fnNoteItemAdded(); // Diagnostics only -- fires for every sack, including the player's own inventory.
+ 	try {
+ 		if (HandleItem(This, item)) {
++#ifdef IAGD_TRACE_HOOKS
++			LogToFile(LogLevel::WARNING, L"TRACE AddItem_Drop: HandleItem consumed the item");
++#endif
+ 			return (void*)1;
+ 		}
+ 	}
+ 	catch (std::exception& ex) {
+-		std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
++		Utf8Compat::Converter converter;
+ 		std::wstring wide = converter.from_bytes(ex.what());
+ 		LogToFile(LogLevel::FATAL, L"Error looting item in Hooked_InventorySack_AddItem_Vec2.. " + wide);
+ 	}
+@@ -215,7 +224,13 @@
+ 		LogToFile(LogLevel::FATAL, L"Error looting item in Hooked_InventorySack_AddItem_Vec2.. (triple-dot)");
+ 	}
+ 
++#ifdef IAGD_TRACE_HOOKS
++	LogToFile(LogLevel::WARNING, L"TRACE AddItem_Drop: about to call the ORIGINAL via trampoline");
++#endif
+ 	void* v = dll_InventorySack_AddItem_Drop(This, item, findPosition, SkipPlaySound);
++#ifdef IAGD_TRACE_HOOKS
++	LogToFile(LogLevel::WARNING, L"TRACE AddItem_Drop: returned from the original OK");
++#endif
+ 	return v;
+ }
+ 
+@@ -235,7 +250,7 @@
+ 		}
+ 	}
+ 	catch (std::exception& ex) {
+-		std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
++		Utf8Compat::Converter converter;
+ 		std::wstring wide = converter.from_bytes(ex.what());
+ 		LogToFile(LogLevel::FATAL, L"Error looting item in Hooked_InventorySack_AddItem_Vec2.. " + wide);
+ 	}
+@@ -262,9 +277,11 @@
+ /// object so we can locate where the real fields land if the struct layout
+ /// has drifted from the game binary.
+ static void DumpReplicaInfo(const GAME::ItemReplicaInfo& item) {
+-	std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> conv;
+-	auto w = [&](const std::string& s) -> std::wstring {
+-		try { return conv.from_bytes(s); }
++	Utf8Compat::Converter conv;
++	// Takes the interop string directly: these fields are MSVC-layout now, so read them
++	// through c_str()/length() rather than converting to std::string first.
++	auto w = [&](const MsvcInterop::String& s) -> std::wstring {
++		try { return conv.from_bytes(std::string(s.c_str(), s.length())); }
+ 		catch (...) { return L"<non-utf8>"; }
+ 	};
+ 
+@@ -413,10 +430,10 @@
+ 	// Use std::ofstream (narrow) and convert all wide strings to UTF-8 explicitly.
+ 	// std::wofstream converts through the system ANSI codepage, which destroys
+ 	// characters outside that codepage (e.g. Polish, Portuguese).
+-	std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> utf8conv;
++	Utf8Compat::Converter utf8conv;
+ 
+ 	std::ofstream stream;
+-	stream.open(fullPath, std::ios::binary);
++	stream.open(std::filesystem::path(fullPath), std::ios::binary);
+ 
+ 	// Write UTF-8 BOM so readers can detect encoding
+ 	stream << "\xEF\xBB\xBF";
+@@ -430,7 +447,7 @@
+ 	// understand them yet (backwards compatible, since it only reads line 1 today).
+ 	for (const auto& line : gameTextLines) {
+ 		// Sanitize: strip \r\n from text to prevent multi-line corruption
+-		std::string textUtf8 = utf8conv.to_bytes(line.text);
++		std::string textUtf8 = utf8conv.to_bytes(line.text.to_std());
+ 		textUtf8.erase(std::remove(textUtf8.begin(), textUtf8.end(), '\r'), textUtf8.end());
+ 		textUtf8.erase(std::remove(textUtf8.begin(), textUtf8.end(), '\n'), textUtf8.end());
+ 		stream << line.textClass << ";" << textUtf8 << "\n";
+@@ -443,7 +460,7 @@
+ 		std::to_wstring(gameTextLines.size()) + L" stat lines)");
+ 
+ 	std::ifstream verification;
+-	verification.open(fullPath);
++	verification.open(std::filesystem::path(fullPath));
+ 	if (verification) {
+ 		return true;
+ 	}
+@@ -477,8 +494,14 @@
+ 
+ 			LogToFile(LogLevel::INFO, L"Display: " + text + L" - " + body);
+ 
+-			// Checking if the game is loading here says true.. checking if its waiting crashes.. odd..
+-			fnShowCinematicText(engine, &text, &body, 5, &color, false);
++			// Same ABI boundary as GetModName: these are MSVC std::basic_string const&
++			// parameters. Passing libstdc++ strings happened to work for long, heap-backed
++			// text (offset 0 held a real pointer) but is wrong in general and breaks
++			// outright for anything short enough to be stored inline.
++			MsvcInterop::WString msvcHeader, msvcBody;
++			msvcHeader.borrow(text);
++			msvcBody.borrow(body);
++			fnShowCinematicText(engine, &msvcHeader, &msvcBody, 5, &color, false);
+ 			m_lastNotificationTickTime = now;
+ 
+ 		} else {
+@@ -486,7 +509,7 @@
+ 		}
+ 	}
+ 	catch (std::exception& ex) {
+-		std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
++		Utf8Compat::Converter converter;
+ 		std::wstring wide = converter.from_bytes(ex.what());
+ 
+ 		LogToFile(LogLevel::WARNING, L": Encountered an exception while displaying text in-game: " + wide);
+@@ -499,7 +522,13 @@
+ std::wstring InventorySack_AddItem::GetModName(GAME::GameInfo* gameInfo) {
+ 	std::wstring modName;
+ 	if (fnGetGameInfoMode(gameInfo) != 1) { // Skip mod name if we're in Crucible, we don't treat that as a mod.
+-		fnGetModNameArg(gameInfo, &modName);
++		// The game writes an MSVC std::basic_string here. Handing it a libstdc++ wstring
++		// made it write characters where libstdc++ keeps its pointer and length, so the
++		// std::remove calls below then walked a garbage range and hung the game.
++		MsvcInterop::Receiver<wchar_t> received;
++		fnGetModNameArg(gameInfo, received.address());
++		modName = received.get();
++
+ 		modName.erase(std::remove(modName.begin(), modName.end(), '\r'), modName.end());
+ 		modName.erase(std::remove(modName.begin(), modName.end(), '\n'), modName.end());
+ 	}
+@@ -517,13 +546,37 @@
+ 		return false;
+ 	}
+ 
++#ifdef IAGD_TRACE_HOOKS
++	LogToFile(LogLevel::WARNING, L"TRACE IsSackToLootFrom: calling fnGetPlayerTransfer");
++#endif
+ 	void* realPtr = fnGetPlayerTransfer(gameEngine);
++#ifdef IAGD_TRACE_HOOKS
++	LogToFile(LogLevel::WARNING, L"TRACE IsSackToLootFrom: fnGetPlayerTransfer returned "
++		+ std::to_wstring(reinterpret_cast<uintptr_t>(realPtr)));
++#endif
+ 	if (realPtr == nullptr) {
+ 		return false;
+ 	}
+ 
+ 	auto sacks = static_cast<std::vector<GAME::InventorySack*>*>(realPtr);
+ 
++#ifdef IAGD_TRACE_HOOKS
++	LogToFile(LogLevel::WARNING, L"TRACE IsSackToLootFrom: sacks->size() = " + std::to_wstring(sacks->size()));
++#endif
++	// PORT GUARD: the game's container is mem::vector, reinterpreted here as std::vector.
++	// That only works while both are the same three-pointer {begin, end, capacity} shape.
++	// MSVC's std::vector is, which is why upstream gets away with it; if libstdc++'s differs
++	// on some build, size() returns garbage and every later index is nonsense. Grim Dawn has
++	// a few dozen stash tabs at most, so anything wild means the cast is wrong -- say so and
++	// bail instead of computing an absurd index.
++	if (sacks->size() > 1024) {
++		LogToFile(LogLevel::FATAL,
++			L"Implausible stash sack count (" + std::to_wstring(sacks->size())
++			+ L"). The mem::vector cast is not layout-compatible with this build's std::vector; "
++			L"aborting IA work to avoid taking the game down.");
++		return false;
++	}
++
+ 	// Not enough sacks to support running IA
+ 	if (sacks->size() < 2) {
+ 		return false;
+@@ -537,9 +590,9 @@
+ 	}
+ 	else {
+ 		// m_stashTabLootFrom is index from 1, we never want to go <0 nor >= size.
+-		toLootFrom = max(0,
+-			min(sacks->size() - 1, m_stashTabLootFrom - 1)
+-		);
++		// Was max(0, min(...)) via windows.h's min/max macros. Both operands convert to
++		// size_t, so the max(0, ...) could never fire; this is the same clamp, explicitly.
++		toLootFrom = std::min(sacks->size() - 1, static_cast<size_t>(m_stashTabLootFrom - 1));
+ 	}
+ 
+ 	// Is this the sack we lot items from?
+@@ -565,7 +618,13 @@
+ 		return false;
+ 
+ 	GAME::ItemReplicaInfo replica;
++#ifdef IAGD_TRACE_HOOKS
++	LogToFile(LogLevel::WARNING, L"TRACE loot: calling fnItemGetItemReplicaInfo");
++#endif
+ 	fnItemGetItemReplicaInfo(item, replica);
++#ifdef IAGD_TRACE_HOOKS
++	LogToFile(LogLevel::WARNING, std::string("TRACE loot: replica baseRecord = ") + replica.baseRecord.c_str());
++#endif
+ 	if (!IsRelevant(replica))
+ 		return false;
+ 
+@@ -657,11 +716,11 @@
+ /// <returns></returns>
+ GAME::ItemReplicaInfo* InventorySack_AddItem::ReadReplicaInfo(const std::wstring& filename) {
+ 	try {
+-		std::ifstream file(filename);
++		std::ifstream file{std::filesystem::path(filename)};
+ 		return GAME::Deserialize(GAME::GetNextLineAndSplitIntoTokens(file));
+ 	}
+ 	catch (std::exception& ex) {
+-		std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
++		Utf8Compat::Converter converter;
+ 		std::wstring wide = converter.from_bytes(ex.what());
+ 
+ 		LogToFile(LogLevel::FATAL, L"ERROR Creating ReplicaItem.." + wide);
+@@ -684,13 +743,38 @@
+ 		return nullptr;
+ 	}
+ 
++#ifdef IAGD_TRACE_HOOKS
++	LogToFile(LogLevel::WARNING, L"TRACE deposit: calling fnGetPlayerTransfer");
++#endif
+ 	void* realPtr = fnGetPlayerTransfer(gameEngine);
++#ifdef IAGD_TRACE_HOOKS
++	LogToFile(LogLevel::WARNING, L"TRACE deposit: fnGetPlayerTransfer -> " + std::to_wstring(reinterpret_cast<uintptr_t>(realPtr)));
++#endif
+ 	if (realPtr == nullptr) {
+ 		return nullptr;
+ 	}
+ 
+ 	auto sacks = static_cast<std::vector<GAME::InventorySack*>*>(realPtr);
+ 
++#ifdef IAGD_TRACE_HOOKS
++	// If the game's mem::vector does not share libstdc++'s 3-pointer layout, this is where
++	// it shows: a wild size() makes size()-2 enormous and at() throw.
++	LogToFile(LogLevel::WARNING, L"TRACE deposit: sacks->size() = " + std::to_wstring(sacks->size()));
++#endif
++	// PORT GUARD: the game's container is mem::vector, reinterpreted here as std::vector.
++	// That only works while both are the same three-pointer {begin, end, capacity} shape.
++	// MSVC's std::vector is, which is why upstream gets away with it; if libstdc++'s differs
++	// on some build, size() returns garbage and every later index is nonsense. Grim Dawn has
++	// a few dozen stash tabs at most, so anything wild means the cast is wrong -- say so and
++	// bail instead of computing an absurd index.
++	if (sacks->size() > 1024) {
++		LogToFile(LogLevel::FATAL,
++			L"Implausible stash sack count (" + std::to_wstring(sacks->size())
++			+ L"). The mem::vector cast is not layout-compatible with this build's std::vector; "
++			L"aborting IA work to avoid taking the game down.");
++		return nullptr;
++	}
++
+ 	// Not enough sacks to even support running IA
+ 	if (sacks->size() < 2) {
+ 		return nullptr;
+@@ -704,12 +788,18 @@
+ 	}
+ 	else {
+ 		// m_stashTabLootFrom is index from 1, we never want to go <0 nor >= size.
+-		toDepositTo = max(0,
+-			min(sacks->size() - 1, m_stashTabDepositTo - 1)
+-		);
++		// See the note in the loot-from path above: the max(0, ...) was vacuous.
++		toDepositTo = std::min(sacks->size() - 1, static_cast<size_t>(m_stashTabDepositTo - 1));
+ 	}
+ 
+-	return sacks->at(toDepositTo);
++#ifdef IAGD_TRACE_HOOKS
++	LogToFile(LogLevel::WARNING, L"TRACE deposit: toDepositTo = " + std::to_wstring(toDepositTo));
++#endif
++	auto result = sacks->at(toDepositTo);
++#ifdef IAGD_TRACE_HOOKS
++	LogToFile(LogLevel::WARNING, L"TRACE deposit: sack resolved OK");
++#endif
++	return result;
+ }
+ 
+ 
+@@ -770,14 +860,31 @@
+ 		}
+ 
+ 		if (m_isTransferStashOpen) {
++#ifdef IAGD_TRACE_HOOKS
++			LogToFile(LogLevel::WARNING, L"TRACE update: stash open, resolving deposit sack");
++#endif
+ 			void* sackPtr = GetSackToDepositTo((GAME::GameEngine*)This);
+ 			if (sackPtr != nullptr) {
+ 				GAME::Rect itemPosition;
++#ifdef IAGD_TRACE_HOOKS
++				// A deadlock parks here: m_mutex is non-recursive and this runs on the
++				// game's main thread every frame while the stash is open.
++				LogToFile(LogLevel::WARNING, L"TRACE update: acquiring m_mutex");
++#endif
+ 				boost::lock_guard<boost::mutex> guard(m_mutex);
+-
++#ifdef IAGD_TRACE_HOOKS
++				LogToFile(LogLevel::WARNING, L"TRACE update: m_mutex acquired");
++#endif
+ 
+ 				bool success = false;
++#ifdef IAGD_TRACE_HOOKS
++				LogToFile(LogLevel::WARNING, L"TRACE update: GetFolderToMoveTo (filesystem, every frame)");
++#endif
+ 				std::wstring targetFolder = GetFolderToMoveTo(GetModName(gameInfo), fnGetHardcore(gameInfo));
++#ifdef IAGD_TRACE_HOOKS
++				LogToFile(LogLevel::WARNING, L"TRACE update: folder ready, depositQueue size = "
++					+ std::to_wstring(m_depositQueue.size()));
++#endif
+ 				for (auto it = m_depositQueue.begin(); it != m_depositQueue.end(); ++it) {
+ 					std::wstring targetFile = targetFolder + L"\\" + randomFilename();
+ 					LogToFile(LogLevel::INFO, L"Handling file " + *it);
+@@ -849,7 +956,7 @@
+ 		}
+ 	}
+ 	catch (std::exception& ex) {
+-		std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
++		Utf8Compat::Converter converter;
+ 		std::wstring wide = converter.from_bytes(ex.what());
+ 		LogToFile(LogLevel::FATAL, L"Error parsing in InventorySack_AddItem::Hooked_GameEngine_Update.. " + wide);
+ 	}
+@@ -921,7 +1028,7 @@
+ 		}
+ 	}
+ 	catch (std::exception& ex) {
+-		std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
++		Utf8Compat::Converter converter;
+ 		std::wstring wide = converter.from_bytes(ex.what());
+ 		LogToFile(LogLevel::FATAL, L"Error parsing in InventorySack_AddItem::ThreadMain.. " + wide);
+ 	}

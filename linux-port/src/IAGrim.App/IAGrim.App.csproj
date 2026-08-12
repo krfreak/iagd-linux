@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>IAGrim.App</RootNamespace>
+    <AssemblyName>iagd</AssemblyName>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <!--
+    Photino gives a native window wrapping the system WebView — WebKitGTK here, the same
+    engine as GNOME Web. It is a thin shim (one small native library) rather than a bundled
+    browser, so this stays a normal .NET app rather than an Electron-sized download.
+
+    The alternative was Avalonia, which would have meant writing the UI twice: once for the
+    desktop window and once for anyone wanting to reach the host from a browser. The host is
+    an HTTP server either way, so pointing a webview at it costs nothing extra.
+  -->
+  <ItemGroup>
+    <PackageReference Include="Photino.NET" Version="4.0.16" />
+    <PackageReference Include="Tmds.DBus.Protocol" Version="0.94.2" />
+  </ItemGroup>
+
+  <!--
+    The window icon travels with the executable. Under XWayland (which this app selects, see
+    Program.ConfigureWebViewBackend) the compositor has no .desktop file to match the window
+    against, so without an icon hint it falls back to a generic one.
+  -->
+  <ItemGroup>
+    <Content Include="assets/iagd*.png" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../IAGrim.Host/IAGrim.Host.csproj" />
+    <ProjectReference Include="../IAGrim.Platform/IAGrim.Platform.csproj" />
+  </ItemGroup>
+
+</Project>

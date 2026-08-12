@@ -1,0 +1,33 @@
+--- a/HookLog.cpp
++++ b/HookLog.cpp
+@@ -8,12 +8,18 @@
+ 
+ // TODO: What's this doing in HookLog.cpp ??
+ std::wstring GetIagdFolder() {
+-    PWSTR path_tmp;
++    // PORT FIX, two defects on the failure path:
++    //   1. path_tmp was uninitialised and CoTaskMemFree'd it when the call failed.
++    //   2. LogToFile writes through g_log, but this function runs from HookLog's own
++    //      constructor -- so on failure it used a HookLog that was still being built.
++    // Neither can be reported, because both happen before any log file exists.
++    PWSTR path_tmp = nullptr;
+     auto get_folder_path_ret = SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, nullptr, &path_tmp);
+ 
+     if (get_folder_path_ret != S_OK) {
+-        CoTaskMemFree(path_tmp);
+-		LogToFile(LogLevel::WARNING, L"ERROR Could not find roaming appdata folder");
++        if (path_tmp != nullptr) {
++            CoTaskMemFree(path_tmp);
++        }
+         return std::wstring();
+     }
+ 
+@@ -32,7 +38,7 @@
+     std::wstring logFile(!iagdFolder.empty() ? iagdFolder : tmpfolder);
+     logFile += L"iagd_hook.log"; 
+ 
+-    m_out.open(logFile);
++    m_out.open(std::filesystem::path(logFile));   // libstdc++ needs a path, MSVC took wstring directly
+ 
+     if (m_out.is_open()) {
+         m_out

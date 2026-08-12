@@ -1,0 +1,6 @@
+[submodule "iagd"]
+	path = iagd
+	url = https://github.com/marius00/iagd
+[submodule "proton-injector"]
+	path = proton-injector
+	url = https://github.com/jokelbaf/proton-injector.git

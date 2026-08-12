@@ -1,0 +1,27 @@
+# Generated third-party trees. Upstream's sources are pinned as submodules and patched into
+# these directories by scripts/prepare.sh — see THIRD-PARTY.md for why they are not committed.
+/build/
+/linux-port/native/hook/generated/
+
+# Build output
+bin/
+obj/
+node_modules/
+/linux-port/native/hook/build/
+/linux-port/packaging/out/
+/linux-port/src/IAGrim.Host/wwwroot/assets/
+/linux-port/src/IAGrim.App/assets/iagd.png
+
+# Collections, logs and other run-time state. A database here would be someone's real
+# collection, complete with the cloud credentials upstream keeps in its settings.
+*.db
+*.db-wal
+*.db-shm
+*.log
+
+# Local Claude Code permissions, which are this machine's rather than the project's.
+/.claude/settings.local.json
+
+# Diagnostic tools are single .c files compiled on demand; the binaries are outputs.
+/linux-port/tools/*/*.dll
+/linux-port/tools/*/*.exe

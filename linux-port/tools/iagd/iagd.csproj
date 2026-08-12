@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>iagd</AssemblyName>
+    <RootNamespace>IAGrim.Cli</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <!-- The CLI carries the icon too, so `iagd install-desktop` works from any entry point. -->
+  <ItemGroup>
+    <Content Include="../../src/IAGrim.App/assets/iagd*.png" Link="assets/%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/IAGrim.Platform/IAGrim.Platform.csproj" />
+    <ProjectReference Include="../../src/IAGrim.Core/IAGrim.Core.csproj" />
+  </ItemGroup>
+
+</Project>

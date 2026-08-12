@@ -1,0 +1,165 @@
+--- a/OnDemandSeedInfo.cpp
++++ b/OnDemandSeedInfo.cpp
+@@ -1,3 +1,5 @@
++#include <filesystem>
++#include <fstream>
+ #include "stdafx.h"
+ #include <stdio.h>
+ #include <random>
+@@ -5,7 +7,7 @@
+ #include "MessageType.h"
+ #include "OnDemandSeedInfo.h"
+ #include "Exports.h"
+-#include <codecvt> // wstring_convert                           
++#include "utf8_compat.h"  // <codecvt> removed in GCC 16
+ #include <boost/property_tree/json_parser.hpp>       
+ #include <boost/filesystem.hpp>
+ #include <boost/range/iterator_range.hpp>
+@@ -101,7 +103,7 @@
+ 		}
+ 	}
+ 	catch (std::exception& ex) {
+-		std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
++		Utf8Compat::Converter converter;
+ 		std::wstring wide = converter.from_bytes(ex.what());
+ 		LogToFile(LogLevel::FATAL, L"Error parsing in OndemandSeedInfo::ThreadMain.. " + wide);
+ 	}
+@@ -135,6 +137,19 @@
+ 
+ 
+ 
++/// Trims a replica string that WE built (assign_owned from a CSV token).
++///
++/// Never call this on a replica the game filled in: those buffers belong to the game's
++/// allocator, and free_owned() would hand one to the wrong allocator.
++static void TrimOwned(MsvcInterop::String& s) {
++	std::string tmp(s.c_str(), s.length());
++	boost::algorithm::trim(tmp);
++	if (tmp.size() != s.length()) {
++		s.free_owned();
++		s = tmp;
++	}
++}
++
+ ParsedSeedRequest* OnDemandSeedInfo::DeserializeReplicaCsv(std::vector<std::string> tokens) {
+ 	if (tokens.size() != 12 && tokens.size() != 15) {
+ 		LogToFile(LogLevel::WARNING, L"Error parsing CSV file, expected 12 or 15 tokens, got " + std::to_wstring(tokens.size()));
+@@ -195,13 +210,13 @@
+ 	}
+ 	//LogToFile(LogLevel::INFO, "READ: " + s);
+ 	
+-	boost::algorithm::trim(item.baseRecord);
+-	boost::algorithm::trim(item.prefixRecord);
+-	boost::algorithm::trim(item.suffixRecord);
+-	boost::algorithm::trim(item.modifierRecord);
+-	boost::algorithm::trim(item.materiaRecord);
+-	boost::algorithm::trim(item.enchantmentRecord);
+-	boost::algorithm::trim(item.transmuteRecord);
++	TrimOwned(item.baseRecord);
++	TrimOwned(item.prefixRecord);
++	TrimOwned(item.suffixRecord);
++	TrimOwned(item.modifierRecord);
++	TrimOwned(item.materiaRecord);
++	TrimOwned(item.enchantmentRecord);
++	TrimOwned(item.transmuteRecord);
+ 	// TODO: !! Trip ascendant records
+ 
+ 	result->itemReplicaInfo = item;
+@@ -220,11 +235,11 @@
+ /// <returns></returns>
+ ParsedSeedRequest* OnDemandSeedInfo::ReadReplicaInfo(const std::wstring& filename) {
+ 	try {
+-		std::ifstream file(filename);
++		std::ifstream file{std::filesystem::path(filename)};
+ 		return DeserializeReplicaCsv(GAME::GetNextLineAndSplitIntoTokens(file));
+ 	}
+ 	catch (std::exception& ex) {
+-		std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
++		Utf8Compat::Converter converter;
+ 		std::wstring wide = converter.from_bytes(ex.what());
+ 
+ 		LogToFile(LogLevel::FATAL, L"ERROR Creating ReplicaItem.." + wide);
+@@ -324,7 +339,7 @@
+ 		}
+ 	}
+ 	catch (std::exception& ex) {
+-		std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
++		Utf8Compat::Converter converter;
+ 		std::wstring wide = converter.from_bytes(ex.what());
+ 		LogToFile(LogLevel::FATAL, L"Error parsing in OnDemandSeedInfo::ThreadMain.. " + wide);
+ 	}
+@@ -335,8 +350,8 @@
+ }
+ 
+ std::string toString(std::wstring s) {
+-	using convert_type = std::codecvt_utf8<wchar_t>;
+-	std::wstring_convert<convert_type, wchar_t> converter;
++	
++	Utf8Compat::Converter converter;
+ 	return converter.to_bytes(s);
+ }
+ 
+@@ -348,16 +363,16 @@
+ 
+ 	// Completely redundant information, might help others to use this DLL.
+ 	boost::property_tree::ptree replica;
+-	replica.put("baseRecord", obj.itemReplicaInfo.baseRecord);
+-	replica.put("prefixRecord", obj.itemReplicaInfo.prefixRecord);
+-	replica.put("suffixRecord", obj.itemReplicaInfo.suffixRecord);
+-	replica.put("modifierRecord", obj.itemReplicaInfo.modifierRecord);
+-	replica.put("transmuteRecord", obj.itemReplicaInfo.transmuteRecord);
++	replica.put("baseRecord", obj.itemReplicaInfo.baseRecord.c_str());
++	replica.put("prefixRecord", obj.itemReplicaInfo.prefixRecord.c_str());
++	replica.put("suffixRecord", obj.itemReplicaInfo.suffixRecord.c_str());
++	replica.put("modifierRecord", obj.itemReplicaInfo.modifierRecord.c_str());
++	replica.put("transmuteRecord", obj.itemReplicaInfo.transmuteRecord.c_str());
+ 	replica.put("seed", obj.itemReplicaInfo.seed);
+-	replica.put("materiaRecord", obj.itemReplicaInfo.materiaRecord);
+-	replica.put("relicBonus", obj.itemReplicaInfo.relicBonus);
++	replica.put("materiaRecord", obj.itemReplicaInfo.materiaRecord.c_str());
++	replica.put("relicBonus", obj.itemReplicaInfo.relicBonus.c_str());
+ 	replica.put("relicSeed", obj.itemReplicaInfo.relicSeed);
+-	replica.put("enchantmentRecord", obj.itemReplicaInfo.enchantmentRecord);
++	replica.put("enchantmentRecord", obj.itemReplicaInfo.enchantmentRecord.c_str());
+ 	replica.put("enchantmentSeed", obj.itemReplicaInfo.enchantmentSeed);
+ 	root.add_child("replica", replica);
+ 	// TODO: ascendant changes here, not critical, not used by IAGD
+@@ -367,7 +382,7 @@
+ 	for (auto& it : gameTextLines) {
+ 		boost::property_tree::ptree stat;
+ 
+-		stat.put<std::string>("text", toString(it.text));
++		stat.put<std::string>("text", toString(it.text.to_std()));
+ 		stat.put("type", it.textClass);
+ 		stats.push_back(std::make_pair("", stat));
+ 	}
+@@ -424,7 +439,7 @@
+ 			return toJson(obj, gameTextLines);
+ 		}
+ 		else {
+-			std::string str = obj.itemReplicaInfo.baseRecord;
++			std::string str = obj.itemReplicaInfo.baseRecord.to_std();
+ 			DataItemPtr item(new DataItem(TYPE_ITEMSEEDDATA_PLAYERID_ERR_NOITEM, str.size(), (char*)str.c_str()));
+ 			m_dataQueue->push(item);
+ 			SetEvent(m_hEvent);
+@@ -511,9 +526,9 @@
+ 					std::stringstream json;
+ 					boost::property_tree::write_json(json, result);
+ 
+-					std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
++					Utf8Compat::Converter converter;
+ 					std::wofstream stream;
+-					stream.open(fullPath);
++					stream.open(std::filesystem::path(fullPath));
+ 					stream << json.str().c_str();
+ 					stream.flush();
+ 					stream.close();
+@@ -534,7 +549,7 @@
+ 			}
+ 		}
+ 		catch (std::exception& ex) {
+-			std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
++			Utf8Compat::Converter converter;
+ 			std::wstring wide = converter.from_bytes(ex.what());
+ 			LogToFile(LogLevel::FATAL, L"Error parsing on-demand item stats.. " + wide);
+ 		}

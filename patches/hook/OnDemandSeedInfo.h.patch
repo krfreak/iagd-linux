@@ -1,0 +1,10 @@
+--- a/OnDemandSeedInfo.h
++++ b/OnDemandSeedInfo.h
+@@ -5,6 +5,7 @@
+ #include "BaseMethodHook.h"
+ #include <string>
+ #include <thread>
++#include <atomic>
+ #include <boost/property_tree/ptree.hpp>             
+ #include <mutex>
+ 

@@ -1,0 +1,65 @@
+--- a/GrimTypes.cpp
++++ b/GrimTypes.cpp
+@@ -143,7 +143,15 @@
+ /// </summary>
+ /// <returns></returns>
+ GAME::GameEngine* fnGetGameEngine() {
+-	auto gameEngine = (GAME::GameEngine*)*(DWORD_PTR*)GetProcAddressOrLogToFile(L"game.dll", "?gGameEngine@GAME@@3PEAVGameEngine@1@EA");
++	// PORT FIX: the export address was dereferenced before being checked. When game.dll is
++	// not loaded (injection during startup) this dereferences null and takes the process
++	// with it, instead of reporting "not ready yet" like every other path here does.
++	auto slot = (DWORD_PTR*)GetProcAddressOrLogToFile(L"game.dll", "?gGameEngine@GAME@@3PEAVGameEngine@1@EA");
++	if (slot == nullptr) {
++		LogToFile(LogLevel::WARNING, "game.dll export gGameEngine unavailable; game not ready.");
++		return nullptr;
++	}
++	auto gameEngine = (GAME::GameEngine*)*slot;
+ 	if (gameEngine == nullptr) {
+ 		LogToFile(LogLevel::WARNING, "Got game engine nullptr, beware if a crash follows this.");
+ 	}
+@@ -155,7 +163,12 @@
+ /// </summary>
+ /// <returns></returns>
+ GAME::Engine* fnGetEngine(bool skipLog) {
+-	auto engine = (GAME::Engine*)*(DWORD_PTR*)GetProcAddressOrLogToFile(L"engine.dll", "?gEngine@GAME@@3PEAVEngine@1@EA", skipLog);
++	// PORT FIX: same unchecked dereference as fnGetGameEngine above.
++	auto slot = (DWORD_PTR*)GetProcAddressOrLogToFile(L"engine.dll", "?gEngine@GAME@@3PEAVEngine@1@EA", skipLog);
++	if (slot == nullptr) {
++		return nullptr;
++	}
++	auto engine = (GAME::Engine*)*slot;
+ 	if (engine == nullptr) {
+ 		LogToFile(LogLevel::WARNING, "Got engine nullptr, beware if a crash follows this.");
+ 	}
+@@ -289,7 +302,25 @@
+ 
+ 
+ 
+-IsGameLoadingPtr IsGameLoading = IsGameLoadingPtr(GetProcAddressOrLogToFile(L"game.dll", "?IsGameLoading@GameEngine@GAME@@QEBA_NXZ"));
+-IsGameLoadingPtr IsGameEngineOnline = IsGameLoadingPtr(GetProcAddressOrLogToFile(L"game.dll", "?IsGameEngineOnline@GameEngine@GAME@@QEBA_NXZ"));
+-IsGameWaitingPtr IsGameWaiting = IsGameWaitingPtr(GetProcAddressOrLogToFile(L"game.dll", "?IsGameWaiting@GameEngine@GAME@@QEAA_N_N@Z"));
+-SortInventorySackPtr SortInventorySack = SortInventorySackPtr(GetProcAddressOrLogToFile(L"game.dll", "?Sort@InventorySack@GAME@@QEAA_NI@Z"));
+\ No newline at end of file
++// PORT FIX (was: initialised here at namespace scope).
++//
++// These initialisers ran during static initialisation, before DllMain. That is a problem
++// twice over. game.dll is not necessarily loaded yet, so GetProcAddress returns NULL and
++// GetProcAddressOrLogToFile logs the failure through g_log -- a global in another
++// translation unit, whose construction order relative to this one is unspecified. Writing
++// to a not-yet-constructed HookLog is undefined behaviour, and it happens before any log
++// file exists, so the resulting crash is completely silent.
++//
++// Resolution is now deferred to ResolveGameExports(), called from ProcessAttach once the
++// game modules are known to be present. Call sites are unchanged.
++IsGameLoadingPtr IsGameLoading = nullptr;
++IsGameLoadingPtr IsGameEngineOnline = nullptr;
++IsGameWaitingPtr IsGameWaiting = nullptr;
++SortInventorySackPtr SortInventorySack = nullptr;
++
++void ResolveGameExports() {
++    IsGameLoading      = IsGameLoadingPtr(GetProcAddressOrLogToFile(L"game.dll", "?IsGameLoading@GameEngine@GAME@@QEBA_NXZ"));
++    IsGameEngineOnline = IsGameLoadingPtr(GetProcAddressOrLogToFile(L"game.dll", "?IsGameEngineOnline@GameEngine@GAME@@QEBA_NXZ"));
++    IsGameWaiting      = IsGameWaitingPtr(GetProcAddressOrLogToFile(L"game.dll", "?IsGameWaiting@GameEngine@GAME@@QEAA_N_N@Z"));
++    SortInventorySack  = SortInventorySackPtr(GetProcAddressOrLogToFile(L"game.dll", "?Sort@InventorySack@GAME@@QEAA_NI@Z"));
++}
+\ No newline at end of file

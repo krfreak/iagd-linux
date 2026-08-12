@@ -1,0 +1,67 @@
+# Upstream provenance manifest.
+#
+# Every place this port copies or reimplements upstream logic, with the hash of the upstream
+# file as it stood when we last checked it. `scripts/check-upstream.sh` recomputes those
+# hashes and reports what has changed.
+#
+# The point is not to automate re-porting -- that will always need judgement -- it is to
+# remove the need to *notice*. Silent divergence from upstream is the real risk: a change to
+# the loot CSV format or an item-record field would otherwise surface as corrupted data
+# months later.
+#
+# Columns: upstream-path <TAB> our-path <TAB> what we take from it
+# Re-record hashes after reviewing a change with:  scripts/check-upstream.sh --accept
+#
+HookDll/Hook/dllmain.cpp	patches/hook/dllmain.cpp.patch	Hook entry point, Wine IPC message format, injection abort protocol
+HookDll/Hook/InventorySack_AddItem.cpp	patches/hook/InventorySack_AddItem.cpp.patch	Instaloot and deposit hooks; loot CSV writer
+HookDll/Hook/GrimTypes.cpp	patches/hook/GrimTypes.cpp.patch	Game struct accessors, replica serialise/deserialise
+HookDll/Hook/GrimTypes.h	patches/hook/GrimTypes.h.patch	ItemReplicaInfo layout and exported symbol names
+HookDll/Hook/OnDemandSeedInfo.cpp	patches/hook/OnDemandSeedInfo.cpp.patch	Item stat resolution, replica request handling
+HookDll/Hook/Exports.h	native/hook/generated/Exports.h  (used unmodified)	Mangled game export names; changes on most GD patches
+HookDll/Hook/MessageType.h	tools/probe/MessageTypes.cs	Message type enum shared with the host
+IAGrim/Services/CsvParsingService.cs	src/IAGrim.Platform/LootCsv.cs	Loot CSV column order and accepted column counts
+Parser/Arc/DDSImageReader.cs	src/IAGrim.Core/Imaging/DdsIconExtractor.cs	DDS/DXT decode; forked only to replace System.Drawing
+Parser/Arc/DDSHeader.cs	src/IAGrim.Core/Imaging/DDSHeader.cs	DDS header parsing (internal upstream, so copied)
+Parser/Arc/DDSPixelFormat.cs	src/IAGrim.Core/Imaging/DDSPixelFormat.cs	DDS pixel format (internal upstream, so copied)
+IAGrim/Database/DAO/PlayerItemDaoImpl.cs	src/IAGrim.Host/CollectionService.cs	Item search semantics (partial port; see PORTING.md)
+IAGrim/UI/Misc/Protocol/IOMessageType.cs	src/IAGrim.Host/Contracts.cs	Host to UI event vocabulary
+IAGrim/Services/ItemStats/SeedStats/ItemStatEngine.cs	src/IAGrim.Core/ItemStats/SeedStats/ItemStatEngine.cs	Seed-stat roll engine; draw order must match the game exactly
+IAGrim/Services/ItemStats/SeedStats/MinstdRandom.cs	src/IAGrim.Core/ItemStats/SeedStats/MinstdRandom.cs	MINSTD generator and priming convention
+IAGrim/Services/ItemStats/SeedStats/Jitter.cs	src/IAGrim.Core/ItemStats/SeedStats/Jitter.cs	Per-field jitter applied to rolled values
+IAGrim/Services/ItemStats/SeedStatCalculator.cs	src/IAGrim.Core/ItemStats/SeedStatCalculator.cs	Bridge from stat rows to the engine; bail-out rule for unmodeled fields
+IAGrim/Services/Dto/DBSTatRow.cs	src/IAGrim.Core/ItemStats/DBStatRow.cs	Stat row DTO the engine consumes
+IAGrim/Database/DAO/DatabaseItemStatDaoImpl.cs	src/IAGrim.Core/ItemStats/StatFilter.cs	Stat blacklist/whitelist gating what reaches the seed engine (verify-stat-filter.sh)
+IAGrim/Database/DAO/Util/ItemOperationsUtility.cs	src/IAGrim.Core/ItemStats/ItemRarity.cs	Classification-to-display-colour map and level requirement (verify-item-rarity.sh)
+IAGrim/Database/DAO/PlayerItemDaoImpl.cs	src/IAGrim.Core/ItemStats/ItemRarity.cs	"Level of green" affix counting and GetRecordsForItem (verify-item-rarity.sh)
+IAGrim/Parsers/Arz/ComplexItemParser.cs	src/IAGrim.Core/GameData/SkillParser.cs	Item-to-granted-skill resolution, including the buffSkillName indirection
+IAGrim/Database/DAO/ItemSkillDaoImpl.cs	src/IAGrim.Host/ItemQuery.cs	Grants-skill and summoner filter semantics
+IAGrim/Database/DAO/ItemCollectionDaoImpl.cs	src/IAGrim.Host/CollectionViewService.cs	Legendary/epic collection checklist and rarity-by-slot aggregates
+IAGrim/Database/DAO/DatabaseItemDaoImpl.cs	src/IAGrim.Host/CollectionViewService.cs	Item-set association: itemSetName to set record to setName tag
+IAGrim/Database/Dto/ItemSearchRequest.cs	src/IAGrim.Host/ItemQuery.cs	The full filter surface; new fields here are new filters to port
+IAGrim/Database/Migrations/AddBaseTables.cs	src/IAGrim.Platform/Schema.cs	The database schema itself: tables and indices (verify-schema.sh)
+IAGrim/Database/Model/PlayerItem.hbm.xml	src/IAGrim.Platform/Schema.cs	PlayerItem column set; mapped columns upstream ALTERs in at startup
+IAGrim/Database/Migrations/HbmSchemaMigration.cs	src/IAGrim.Platform/Schema.cs	Why hbm-declared columns must be added on top of the CREATE statements
+IAGrim/Services/ItemStatService.cs	src/IAGrim.Core/ItemStats/StatPrecomputeService.cs	Which records feed the seed engine, and the replica-vs-computed rule
+IAGrim/Parsers/GameDataParsing/Service/ArzParsingWrapper.cs	src/IAGrim.Core/ItemStats/StatPrecomputeService.cs	Pet-bonus record classification and the "pet" stat-name prefix
+HookDll/Hook/SettingsReader.cpp	src/IAGrim.Platform/BridgeSettings.cs	The three settings.json keys the hook reads; isRunningInWine gates file IPC
+StatTranslator/ItemNameCombinator.cs	src/IAGrim.Core/GameData/ItemDatabase.cs	Gender-marker resolution for localised item names (referenced, not copied)
+IAGrim/Backup/FileWriter/GDFileExporter.cs	src/IAGrim.Core/Backup/ItemExport.cs	GD Stash/Mambastash interchange format: field order and version gates
+IAGrim/UI/Filters/Damage.cs	src/IAGrim.Core/ItemStats/FilterGroups.cs	Damage-type checkbox stat fields (verify-filter-groups.sh)
+IAGrim/UI/Filters/DamageOverTime.cs	src/IAGrim.Core/ItemStats/FilterGroups.cs	Damage-over-time checkbox stat fields (verify-filter-groups.sh)
+IAGrim/UI/Filters/Resistances.cs	src/IAGrim.Core/ItemStats/FilterGroups.cs	Resistance checkbox stat fields (verify-filter-groups.sh)
+IAGrim/UI/Filters/Misc.cs	src/IAGrim.Core/ItemStats/FilterGroups.cs	Misc checkbox stat fields (verify-filter-groups.sh)
+IAGrim/Database/DAO/ItemTagDaoImpl.cs	src/IAGrim.Host/CollectionService.cs	Mastery discovery from tags, incl. expansion tag normalisation
+IAGrim/Parsers/GameDataParsing/Service/GrimFolderUtility.cs	src/IAGrim.Core/GameData/ItemDatabase.cs	Expansion folder range and mod/arz discovery
+Parser/Stash/Stash.cs	src/IAGrim.Core/Stash/TransferStash.cs	Transfer stash header layout and supported versions
+Parser/Stash/Item.cs	src/IAGrim.Core/Stash/TransferStash.cs	Stash item field order per version; v11 adds one uint
+Parser/Stash/StashTab.cs	src/IAGrim.Core/Stash/TransferStash.cs	Stash tab framing and v9+ decoration fields
+IAGrim/Utilities/GlobalPaths.cs	src/IAGrim.Core/Stash/TransferStash.cs	Transfer file names, hardcore suffix, downgrade variants
+IAGrim/Parsers/Arz/TransferStashService.cs	src/IAGrim.Platform/TransferService.cs	Deposit is CSV-for-the-hook; confirms no stash write path
+IAGrim/Parsers/GameDataParsing/Service/ParsingService.cs	src/IAGrim.Core/GameData/ItemDatabase.cs	Highest-timestamp scan used to detect a Grim Dawn update
+IAGrim/StartupService.cs	src/IAGrim.Core/GameData/GameDataStatus.cs	Stale-game-data and parsed-language checks
+IAGrim/UI/Controller/ItemTransferController.cs	src/IAGrim.Host/ApiRouter.cs	transferAnyMod gating the choice of target stash
+IAGrim/Services/ItemReplica/ItemReplicaRequesterService.cs	src/IAGrim.Platform/ReplicaService.cs	Replica request cadence, in-flight cap and dedupe cache
+HookDll/Hook/OnDemandSeedInfo.cpp	src/IAGrim.Platform/ReplicaService.cs	Replica request CSV field order and response JSON shape
+IAGrim/UI/Tabs/SettingsWindow.cs	src/IAGrim.Platform/AppSettings.cs	The settings a user can actually change; new controls here are new settings to consider
+IAGrim/UI/Controller/dto/JsonSkill.cs	src/IAGrim.Host/Contracts.cs	Granted-skill display fields
+IAGrim/Services/CsvFileMonitor.cs	src/IAGrim.Host/LootImporter.cs	Poll cadence for bridge activity while the game runs

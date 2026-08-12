@@ -1,0 +1,102 @@
+--- a/dllmain.cpp
++++ b/dllmain.cpp
+@@ -1,6 +1,6 @@
+ #include "stdafx.h"
+ #include <chrono>
+-#include <codecvt> // wstring_convert
++#include "utf8_compat.h" // <codecvt> removed in GCC 16
+ #include <windows.h>
+ #include <stdlib.h>
+ #include <objbase.h>
+@@ -46,6 +46,7 @@
+ 
+ bool g_isRunningInWine = false;
+ std::wstring g_linuxHackFolder;
++HANDLE g_singleInstanceMutex = NULL;
+ 
+ #pragma endregion
+ 
+@@ -235,8 +236,7 @@
+ 		}
+ 	}
+ 	catch (std::exception& ex) {
+-		std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
+-		std::wstring wide = converter.from_bytes(ex.what());
++		std::wstring wide = Utf8Compat::FromBytes(ex.what());
+ 		LogToFile(LogLevel::FATAL, L"ERROR In the worker thread.." + wide);
+ 	}
+ 	catch (...) {
+@@ -301,8 +301,7 @@
+ 	catch (std::exception& ex) {
+ 		// For now just let it be. Known issue inside InventorySack_AddItem
+ 
+-		std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
+-		std::wstring wide = converter.from_bytes(ex.what());
++		std::wstring wide = Utf8Compat::FromBytes(ex.what());
+ 
+ 		LogToFile(LogLevel::FATAL, L"ERROR Configuring instaloot hook.." + wide);
+ 
+@@ -418,11 +417,50 @@
+ 
+ std::vector<BaseMethodHook*> hooks;
+ std::wstring GetIagdFolder();
++/// PORT FIX: refuse to initialise if this hook is already loaded in the target.
++///
++/// LoadLibrary only dedupes by module path, so the same code injected under a second
++/// filename loads a second, independent copy. Both then hook the same game functions --
++/// the later one patching over the earlier one's trampolines -- and both start their own
++/// worker and seed-info threads writing the same files. That crashes the game.
++///
++/// The mutex name carries the pid so separate game processes are unaffected.
++static bool ClaimSingleInstance() {
++	const std::wstring name = L"Local\\ItemAssistantHook_" + std::to_wstring(GetCurrentProcessId());
++
++	g_singleInstanceMutex = CreateMutexW(NULL, TRUE, name.c_str());
++	if (g_singleInstanceMutex == NULL) {
++		// Cannot tell either way; better to proceed than to block a legitimate attach.
++		LogToFile(LogLevel::WARNING, L"Could not create the single-instance mutex, continuing anyway.");
++		return true;
++	}
++
++	if (GetLastError() == ERROR_ALREADY_EXISTS) {
++		CloseHandle(g_singleInstanceMutex);
++		g_singleInstanceMutex = NULL;
++		return false;
++	}
++
++	return true;
++}
++
+ int ProcessAttach(HINSTANCE _hModule) {
+ 	//GetProductAndVersion();
+ 	LogToFile(LogLevel::INFO, std::string("DLL Compiled: ") + std::string(__DATE__) + std::string(" ") + std::string(__TIME__));
+ 	LogToFile(LogLevel::INFO, L"Attatching to process..");
+ 
++	if (!ClaimSingleInstance()) {
++		LogToFile(LogLevel::FATAL,
++			L"This hook is already loaded in this process; refusing to attach a second copy. "
++			L"Two copies would hook the same functions and crash the game.");
++		return FALSE;
++	}
++
++	// PORT FIX: resolve the game.dll exports that used to be bound during static
++	// initialisation. Doing it here means the DLL is fully constructed first, so a missing
++	// export logs cleanly instead of corrupting a half-built logger.
++	ResolveGameExports();
++
+ 	// Check if running in Wine/Proton
+ 	try {
+ 		SettingsReader settingsReader;
+@@ -554,6 +592,12 @@
+ 
+ 	EndWorkerThread();
+ 
++	if (g_singleInstanceMutex != NULL) {
++		ReleaseMutex(g_singleInstanceMutex);
++		CloseHandle(g_singleInstanceMutex);
++		g_singleInstanceMutex = NULL;
++	}
++
+ 	// Best-effort cleanup of PID file in Wine mode
+ 	if (g_isRunningInWine && !g_linuxHackFolder.empty()) {
+ 		DWORD pid = GetCurrentProcessId();
