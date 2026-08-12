@@ -42,8 +42,18 @@ public sealed record LootedItem {
 
     public IReadOnlyList<LootStat> Stats { get; init; } = [];
 
+    /// <summary>
+    /// The name already known for this item, when it did not come from the game.
+    ///
+    /// A collection being merged in stores the name upstream resolved, and often has no tooltip
+    /// lines at all — the prefix collection on this machine has 7,480 named items and zero
+    /// replica rows. Without this the name would be dropped and the item would arrive nameless,
+    /// which breaks the name search and the ordering that upstream does on that column.
+    /// </summary>
+    public string? KnownName { get; init; }
+
     /// <summary>First stat line, which the game emits as the item's name.</summary>
-    public string? Name => Stats.FirstOrDefault()?.Text;
+    public string? Name => KnownName ?? Stats.FirstOrDefault()?.Text;
 
     /// <summary>
     /// Every record the item is composed of, in upstream's order —

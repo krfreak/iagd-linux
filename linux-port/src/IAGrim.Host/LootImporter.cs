@@ -18,12 +18,25 @@ internal static class LootImporter {
         Func<DateTime?> gameStartTime,
         Func<AppSettings> settings,
         AutoAttachService? autoAttach,
+        SteamPaths? paths,
         CancellationToken cancellationToken) {
 
         if (bridge is null) {
             Console.WriteLine("warning: no Proton prefix; loot import disabled.");
             return;
         }
+
+        // Outside the loop on purpose: the service remembers which items it has already asked
+        // the game to describe, and rebuilding it every pass would throw that away — which is
+        // how the same twenty items ended up being asked for every two seconds.
+        var replicas = new ReplicaService(bridge);
+
+        // The last state the UI was told about. Everything the header shows — the game starting,
+        // the hook attaching, the collection growing — changes while nobody is making requests,
+        // and a page that asked once at load would go on saying "Grim Dawn is not running" for
+        // the rest of the session. Upstream's window updates itself continuously for the same
+        // reason; this is the equivalent for a UI at the end of a socket.
+        HostStatus? lastStatus = null;
 
         while (!cancellationToken.IsCancellationRequested) {
             try {
@@ -46,13 +59,22 @@ internal static class LootImporter {
                     }
                 }
 
+                if (paths is not null) {
+                    var status = collection.Status(paths, bridge, startedAt, settings(),
+                                                   autoAttach?.State(settings().AutoAttach).Attaching ?? false);
+                    // Records compare by value, so this is "has anything the user can see moved".
+                    if (status != lastStatus) {
+                        lastStatus = status;
+                        await events.BroadcastAsync(HostEvent.Status(status), cancellationToken);
+                    }
+                }
+
                 using var store = new LootStore(LinuxPaths.DatabaseFile);
                 var watcher = new LootWatcher(bridge, store);
 
                 // Items that arrived from a file have no tooltip; the game can render one, but
                 // only while it is running with the hook attached. Asking otherwise just piles
                 // request files into the prefix for a reader that is not there.
-                var replicas = new ReplicaService(bridge);
                 var completed = replicas.CollectResults(store);
                 if (startedAt is not null) {
                     replicas.RequestMissing(store);
@@ -77,9 +99,24 @@ internal static class LootImporter {
 
                     Console.WriteLine($"looted: {result.Item!.PlainName}");
 
+                    // Rarity, level and rolled values for the item that just arrived, so it is
+                    // drawn as the epic it is rather than in the "unknown" colour until the next
+                    // full pass. Upstream does the same on import.
+                    try {
+                        using var connection = new Microsoft.Data.Sqlite.SqliteConnection(
+                            $"Data Source={LinuxPaths.DatabaseFile}");
+                        connection.Open();
+                        IAGrim.Core.ItemStats.NewItemDetails.Apply(connection, [result.Id]);
+                    }
+                    catch (Exception ex) {
+                        // Cosmetic until the next pass; never worth failing an import over.
+                        Console.Error.WriteLine($"could not describe the new item: {ex.Message}");
+                    }
+
                     // Re-read through the collection so the UI gets the same enriched shape
-                    // the search endpoint returns, not a second thinner one.
-                    var newest = collection.Search(new ItemQuery(), 0, 1).Items.FirstOrDefault();
+                    // the search endpoint returns, not a second thinner one. By id: the list is
+                    // ordered by name, so "the first row of an unfiltered search" is not this.
+                    var newest = collection.Card(result.Id);
                     if (newest is not null) {
                         await events.BroadcastAsync(HostEvent.Looted(newest), cancellationToken);
                     }

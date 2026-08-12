@@ -45,7 +45,7 @@ export interface ItemDetail {
 }
 
 export interface ItemPage {
-  items: ItemSummary[];
+  items: ItemCard[];
   total: number;
   skip: number;
   take: number;
@@ -133,6 +133,8 @@ export interface ItemFilters {
   /** Stat-name groups: OR within a group, AND between groups. */
   has?: string[][];
   hardcore?: boolean;
+  /** Upstream's "Order By Level" checkbox: level first, then name. */
+  orderByLevel?: boolean;
 }
 
 /** A mod the player has items from, or whose item database has been parsed. */
@@ -163,6 +165,26 @@ export interface FilterCatalogue {
   misc: FilterGroup[];
   /** Masteries this installation defines, e.g. { id: "class03", name: "Occultist" }. */
   classes: { id: string; name: string }[];
+  /** The slot dropdown, straight from upstream's UIHelper. */
+  slots: SlotOption[];
+  /** The rarity dropdown. Labels are upstream's colour names, not the game's. */
+  rarities: RarityOption[];
+}
+
+export interface SlotOption {
+  tag: string;
+  label: string;
+  itemClasses: string[];
+  /** True only for "Other", which matches everything the named slots do not. */
+  inverse: boolean;
+}
+
+export interface RarityOption {
+  tag: string;
+  label: string;
+  rarity: string | null;
+  /** Rare-affix count, not a rarity: three entries share "Green" and differ only here. */
+  prefixRarity: number;
 }
 
 /** IA's display colours, in the order the game ranks them. */
@@ -197,6 +219,7 @@ function filterParams(filters: ItemFilters): URLSearchParams {
   set('retaliation', filters.retaliation);
   set('petScope', filters.petScope);
   set('hasPetBonus', filters.hasPetBonus);
+  set('orderByLevel', filters.orderByLevel);
   if (filters.hardcore !== undefined) params.set('hardcore', filters.hardcore ? '1' : '0');
 
   // Repeatable parameters: the host reads each occurrence separately.
@@ -230,6 +253,20 @@ export interface MergeProgressEvent {
   stage: 'merge' | 'stats';
   /** What the stats pass is doing; absent while merging. */
   message: string | null;
+}
+
+/**
+ * One card in the item list.
+ *
+ * Identical items arrive as one card: the host groups them by base record plus prefix plus
+ * suffix, as upstream's MergeStackSize does, and `copies` is what its "Transfer all (N)" counts.
+ */
+export interface ItemCard {
+  item: ItemSummary;
+  stats: ItemStatLine[];
+  skill: ItemSkillInfo | null;
+  copies: number;
+  duplicates: number[];
 }
 
 export interface CollectionEntry {
@@ -394,7 +431,7 @@ export const api = {
 };
 
 export type HostEvent =
-  | { type: 'itemLooted'; data: ItemSummary }
+  | { type: 'itemLooted'; data: ItemCard }
   | { type: 'itemRemoved'; data: { id: number } }
   | { type: 'status'; data: HostStatus }
   | { type: 'message'; data: { text: string; level: string } }

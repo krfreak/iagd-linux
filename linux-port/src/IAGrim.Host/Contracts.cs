@@ -43,7 +43,19 @@ public sealed record ItemSkillInfo(string? Name, string? Description, long Level
 public sealed record ItemDetail(ItemSummary Item, IReadOnlyList<ItemStatLine> Stats,
                                 ItemSkillInfo? Skill);
 
-public sealed record ItemPage(IReadOnlyList<ItemSummary> Items, int Total, int Skip, int Take);
+/// <summary>
+/// One card in the item list: an item, everything needed to render it, and how many identical
+/// copies it stands for.
+/// </summary>
+/// <param name="Copies">
+/// How many rows merged into this card — upstream's "Transfer all (N)". One means the card is
+/// exactly one item.
+/// </param>
+/// <param name="Duplicates">The row ids behind it, the first being <c>Item.Id</c>.</param>
+public sealed record ItemCard(ItemSummary Item, IReadOnlyList<ItemStatLine> Stats,
+                              ItemSkillInfo? Skill, int Copies, IReadOnlyList<long> Duplicates);
+
+public sealed record ItemPage(IReadOnlyList<ItemCard> Items, int Total, int Skip, int Take);
 
 /// <summary>What the UI needs to explain itself when something is not working.</summary>
 public sealed record HostStatus(
@@ -93,7 +105,7 @@ public sealed record TransferResult(bool Collected, string Message, string? Queu
 /// set of event kinds the UI switches on.
 /// </summary>
 public sealed record HostEvent(string Type, object? Data = null) {
-    public static HostEvent Looted(ItemSummary item) => new("itemLooted", item);
+    public static HostEvent Looted(ItemCard item) => new("itemLooted", item);
     public static HostEvent Removed(long id) => new("itemRemoved", new { id });
     public static HostEvent Status(HostStatus status) => new("status", status);
     /// <param name="stage">"merge" while rows are read, "stats" during the pass that follows.</param>

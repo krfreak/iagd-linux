@@ -72,7 +72,7 @@ public sealed class StatPrecomputeService {
 
         // Pass 2: the stat rows themselves, unfiltered — this table is upstream's raw store and
         // the seed-engine filter belongs at the point of reading, not here. See StatFilter.
-        var statsByRecord = LoadStatsFor(wanted, petTargets, progress);
+        var statsByRecord = LoadStatsFor(wanted, petTargets, progress, LoadTagNames(connection));
         progress?.Invoke($"loaded stats for {statsByRecord.Count:N0} records");
 
         using var transaction = connection.BeginTransaction();
@@ -365,14 +365,40 @@ public sealed class StatPrecomputeService {
     /// Streams every .arz, keeping only the records asked for. Later archives override
     /// earlier ones, matching how expansions rebalance base-game items.
     /// </summary>
+    /// <summary>tag → display text, as 'iagd parse' resolved it for the chosen language.</summary>
+    private static Dictionary<string, string> LoadTagNames(SqliteConnection connection) {
+        var tags = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT Tag, Name FROM ItemTag;";
+        try {
+            using var reader = command.ExecuteReader();
+            while (reader.Read()) {
+                if (!reader.IsDBNull(0) && !reader.IsDBNull(1)) tags[reader.GetString(0)] = reader.GetString(1);
+            }
+        }
+        catch (SqliteException) { /* not parsed yet */ }
+        return tags;
+    }
+
     private Dictionary<string, List<DBStatRow>> LoadStatsFor(
-        HashSet<string> wanted, HashSet<string> petRecords, Action<string>? progress) {
+        HashSet<string> wanted, HashSet<string> petRecords, Action<string>? progress,
+        Dictionary<string, string> tagNames) {
 
         var result = new Dictionary<string, List<DBStatRow>>(StringComparer.OrdinalIgnoreCase);
+
+        // "+2 to Black Death" is two stats in the game's data — a skill record and a level —
+        // and one line on the item. Upstream merges them while parsing (ArzParser's
+        // GetSpecialSkillAugments) into a single augmentSkill{i} carrying the skill's display
+        // name, because nothing downstream can resolve a record to a name. Collected in the
+        // same scan, since the skill records are streaming past anyway.
+        var skillNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var database in ItemDatabase.FindDatabases(_gameDir)) {
             progress?.Invoke($"scanning {Path.GetFileName(database)}");
             foreach (var (record, stats) in ItemDatabase.LoadAllStats(database, applyStatFilter: false)) {
+                var displayName = stats.FirstOrDefault(s => s.Stat == "skillDisplayName")?.TextValue;
+                if (displayName is not null) skillNames[record] = displayName;
+
                 if (!wanted.Contains(record)) continue;
 
                 // A pet-bonus target's every stat is stored under a "pet"-prefixed name, so
@@ -388,6 +414,54 @@ public sealed class StatPrecomputeService {
                     : stats;
             }
         }
+
+        AddSkillAugments(result, skillNames, tagNames);
         return result;
+    }
+
+    /// <summary>
+    /// Turns each augmentSkillName/augmentSkillLevel pair into the single augmentSkill{i} row
+    /// upstream's rules read, and the mastery pair into augmentMastery{i}.
+    ///
+    /// The skill's display name is a tag rather than text — <c>skillDisplayName</c> on the skill
+    /// record — and the format strings ("+{0} to {3}", "+{0} to All Skills in {3}") come from
+    /// upstream's own language table, so a resolved tag is all that is needed here.
+    /// </summary>
+    private static void AddSkillAugments(
+        Dictionary<string, List<DBStatRow>> statsByRecord,
+        Dictionary<string, string> skillNames,
+        Dictionary<string, string> tagNames) {
+
+        foreach (var (record, stats) in statsByRecord) {
+            for (var i = 1; i <= 4; i++) {
+                // The skill's name is stored resolved: the rules put TextValue straight into
+                // the line ("+{0} to {3}") without a tag lookup of their own.
+                Merge(stats, $"augmentSkillName{i}", $"augmentSkillLevel{i}", $"augmentSkill{i}",
+                      skill => skillNames.TryGetValue(skill, out var tag)
+                            && tagNames.TryGetValue(tag, out var text) ? text : null);
+
+                // The mastery's stays a tag: TryGetClassName resolves it, and passing the
+                // resolved text would make that lookup fail and print nothing.
+                Merge(stats, $"augmentMasteryName{i}", $"augmentMasteryLevel{i}", $"augmentMastery{i}",
+                      mastery => skillNames.TryGetValue(mastery, out var tag) ? tag : null);
+            }
+        }
+
+        static void Merge(List<DBStatRow> stats, string nameStat, string levelStat, string merged,
+                          Func<string, string?> resolve) {
+            var name = stats.FirstOrDefault(s => s.Stat == nameStat)?.TextValue;
+            var level = stats.FirstOrDefault(s => s.Stat == levelStat);
+            if (name is null || level is null) return;
+
+            var resolved = resolve(name);
+            if (resolved is null) return;
+
+            stats.Add(new DBStatRow {
+                Record    = stats.FirstOrDefault()?.Record,
+                Stat      = merged,
+                Value     = level.Value,
+                TextValue = resolved,
+            });
+        }
     }
 }

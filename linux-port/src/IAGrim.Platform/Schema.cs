@@ -187,6 +187,9 @@ public static class Schema {
 
         MigrateFromPortSchema(connection);
         RemoveOrphanedRows(connection);
+
+        // Captured tooltips stored before this port normalised them the way upstream does.
+        ReplicaService.NormaliseStoredRows(connection);
     }
 
     /// <summary>

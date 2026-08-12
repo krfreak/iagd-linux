@@ -1,7 +1,9 @@
 namespace IAGrim.Platform;
 
 /// <summary>Reports what happened to a single loot file.</summary>
-public sealed record LootImportResult(string File, LootedItem? Item, string? Error, bool Duplicate);
+/// <param name="Id">The new row, so a caller can show exactly the item that arrived.</param>
+public sealed record LootImportResult(string File, LootedItem? Item, string? Error, bool Duplicate,
+                                      long Id = 0);
 
 /// <summary>
 /// Imports loot files the hook drops into the bridge.
@@ -71,9 +73,9 @@ public sealed class LootWatcher : IDisposable {
             return new LootImportResult(file, item, null, Duplicate: true);
         }
 
-        _store.Insert(item);
+        var id = _store.Insert(item);
         Consume(file);
-        return new LootImportResult(file, item, null, false);
+        return new LootImportResult(file, item, null, false, id);
     }
 
     /// <summary>

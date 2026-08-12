@@ -125,6 +125,81 @@ ending with a rarity. Its records match the source exactly — 12,781 rows again
 three missing ones being orphans in the source itself, left behind by an item deleted in the
 Windows tool.
 
+### The window's layout
+
+Upstream is WinForms chrome wrapped around an embedded browser: tab strip and status bar from
+the window, filter panels and the search toolbar from WinForms, and only the item list itself
+from the web page. This port draws all of it in one page, but as the same arrangement — tabs
+across the top (Items, Online, Settings, Grim Dawn), five collapsible filter panels down the
+left, the search toolbar above the list, and "N matching items found" along the bottom.
+
+The two dropdowns in that toolbar are data, not decoration: `SlotFilters` is upstream's
+`UIHelper.SlotFilter` and `UIHelper.QualityFilter`, each slot label mapped to the item classes it
+selects. A wrong class there fails silently — the dropdown works, the search returns items, it
+just excludes a slot the Windows tool would include — so `verify-slot-filters.sh` re-extracts
+both tables from the pinned checkout and compares them against what the port serves at runtime.
+
+**Identical items are one card.** The host groups rows by base record plus prefix plus suffix,
+which is upstream's `ItemOperationsUtility.MergeStackSize`, and the card offers "Transfer all
+(N)". Paging counts groups rather than rows, or scrolling would run off the end of the list.
+Ordering is upstream's too: name then id, and level first when "Order By Level" is ticked —
+ascending in both cases, from `PlayerItemDaoImpl.SearchForItems`.
+
+**The card is upstream's card.** Icon, name in its rarity colour, the tooltip the game itself
+drew, then the level requirement and the transfer links along the bottom edge. Two details are
+worth stating because they are not what a fresh implementation would do:
+
+- The name has its colour codes **stripped** and is coloured by rarity as a whole, rather than
+  rendered `^P`-segment by segment. That is upstream's rendering, and a Mythical reads as one
+  purple name in both tools.
+- Tooltip rows are styled by their **row type**, ported from upstream's `ReplicaStat.css`: type
+  34 is the "Granted Skills" heading, 22 is "(2) Set", 19 the level requirement. Types 3, 4, 5,
+  6, 64 and 77 are hidden because the header already shows them, and 35 is hidden because
+  "[Release Ctrl to Hide Details]" is a prompt to someone standing in front of the game.
+
+The palette is upstream's dark theme value for value (`WebUI/src/style/index.css`, `.App-dark`):
+`#a638ff` legendary, `#338cce` epic, `#08b908` magical, `#dbb284` stat text. The only deliberate
+substitution is the rarity glow behind an icon, which upstream draws with a PNG per colour and
+this port draws as a radial gradient — its images are its own.
+
+**Stat text has two sources, as it does upstream.** The hook captures what Grim Dawn actually
+rendered, and that is used whenever it exists. Everything else — a merged collection, a GD Stash
+import — is described from the game's own database instead, by `ItemStatText`.
+
+That describing is upstream's own code rather than a reimplementation: this project already
+referenced its `StatTranslator` for `ItemNameCombinator`, so `StatManager` and `EnglishLanguage`
+were already compiled in and merely unused. A thousand lines of stat-to-text rules — damage
+ranges, conversions, racial bonuses, pet scoping — is exactly the material that comes out subtly
+wrong when retyped, and the tags come from `ItemTag`, filled by `iagd parse`, so nothing needs
+the game's archives at request time.
+
+What the port supplies is the input: every stat of every record the item is made of, with its
+rolled values from `ComputedItemStat` laid over them. Two details are upstream's and easy to get
+wrong:
+
+- `+2 to Black Death` is two rows in the game's data, a skill record and a level. Upstream merges
+  them while parsing (`ArzParser.GetSpecialSkillAugments`) into one `augmentSkill{i}` carrying
+  the skill's *resolved* name, because nothing downstream can turn a record into a name. The
+  precompute pass does the same, in the scan that is already streaming those records past.
+  Masteries keep their tag instead, since `TryGetClassName` resolves that itself.
+- Identical lines are dropped, which upstream does with a `ToHashSet()` over its rendered stats.
+  An item is several records, and where two carry the same stat the same sentence comes out
+  twice — three copies of "+198% Aether Damage" on a real item before this.
+
+**Verified against the game's own rendering.** Any item with a captured tooltip is a known-good
+answer, so the two were compared line by line. Every stat the game showed is present, and the
+differences are upstream's rendering rather than defects: damage lines are ordered
+alphabetically, attack speed reads "Speed: Very Slow (-0.18)" rather than "1.46 Attacks per
+Second", "Frost Damage" rather than "Frostburn Damage", and `skillCooldownReduction` prints with
+a minus because upstream's own tag is `-{0}% Skill Cooldown Reduction`. The game's `[204-306]`
+range annotations are absent, being its ctrl-detail display rather than a property of the item.
+
+**Clicking an item opens a docked panel**, not a floating one. Upstream has no equivalent — its
+card carries everything — so this panel exists only for what the card cannot do: choosing which
+stash an item goes to, following a queued transfer, and copying the record and seed. It shows
+the granted skill and those controls, and deliberately not the stat lines the card behind it is
+already showing. When it is open the list reflows to whatever whole cards still fit.
+
 ### Choosing paths
 
 The settings page has a **Choose…** button beside the collection and Grim Dawn paths, backed by
@@ -628,6 +703,187 @@ Two things make this less trivial than swapping a filename:
 Composed names — prefix + quality + core + suffix — come from the game's own tooltip through the
 hook, so they are already in the player's language and already agree grammatically. Only the
 template names needed this.
+
+### The window has to keep itself up to date
+
+The host knew the game was running and the hook was attached; the window said "Grim Dawn is not
+running" for the rest of the session. Status was pushed only after a merge or a settings change,
+and the page asked for it once when it loaded — so anything that changed while nobody was making
+requests never reached the screen.
+
+The import loop now sends the status whenever it differs from what was last sent. It ticks every
+two seconds anyway, `HostStatus` is a record so the comparison is a value comparison, and nothing
+is sent while nothing moves. Upstream's window updates itself continuously for the same reason;
+this is the equivalent for a UI at the end of a socket.
+
+**Retrying after an abort is what a player feels.** The DLL refuses to attach at the main menu
+and at character select, so the interval between attempts is the delay between loading a
+character and the hook going live. Upstream retries about once a second, which it can afford —
+an in-process FindWindow and a subprocess with a one-second timeout. Each attempt here launches
+Proton, so the interval is eight seconds: often enough not to be noticed, rarely enough not to
+tax a machine that is running a game.
+
+### Injecting only once the game can take it
+
+Upstream never looks for a *process*. `InjectionHelper` calls `FindWindowEx(NULL, prev, "Grim
+Dawn", NULL)` and injects into whoever owns that window — window class, not image name. That is
+the readiness gate, and it is the whole difference between attaching cleanly and mauling a game
+that is still starting: the process exists within a second of launch, while the window only
+appears once the loader has finished and the engine is up.
+
+This port had been passing `--attach-name "Grim Dawn.exe"` instead, so every attach attempt
+found the process immediately and fired a `LoadLibraryA` remote thread into a half-initialised
+game. `LoadLibraryA returned NULL` each time, and the injector's own retry loop kept going —
+twenty-six attempts in one launch, observed. The game does not enjoy that.
+
+Three changes, all of them upstream's behaviour:
+
+- `--attach-window` in the injector patch: `FindWindowExW` by class, then by title as a
+  fallback, then `GetWindowThreadProcessId` — the same call pair upstream uses. No window means
+  no injection attempt at all, reported as `NOT READY` rather than as a failure.
+- **One injection per invocation.** `HookAttacher` now sets `RETRY_MS=0`, so the cadence is
+  `AutoAttachService`'s and not a loop inside the injector. Upstream injects at most once per
+  pass for the same reason.
+- A missing window is a *not ready* outcome, so the service keeps its short 10 s interval
+  instead of backing off to five minutes as it would after a real failure.
+
+Verified in the prefix: with nothing running the injector waits, logs `NOT READY: no window of
+'Grim Dawn' after 3000 ms` and injects nothing; pointed at a live Wine window it reports
+`Found window 'Wine configuration' (PID: 220)` and makes exactly one attempt.
+
+**The injector must not own a console.** Wine gives a console-subsystem program a console, and
+when the program is launched by a service rather than from a terminal, that console is a window
+— which appeared over the game every time the attacher polled. On a "minimise on focus loss"
+setup that took the game down with it, and Grim Dawn stops its game loop while minimised, so it
+was a genuinely bad experience rather than a cosmetic one. Upstream avoids the same window with
+`CreateNoWindow` on its injector process (`InjectionHelper.InjectXBit`); there is no equivalent
+to set from the Linux side, so the binary itself is linked `-mwindows` with a `wWinMain` that
+forwards to `wmain` (`patches/proton-injector/Makefile.patch`). Output goes to `--log-file`,
+which the attach script now prints a tail of, since nothing reaches a terminal any more.
+
+While testing this, the attach script was also found to report `ABORTED` for a run that never
+injected: it swept stale markers only when a `.PID` file existed, so an old `.ABORTED` from a
+previous session survived for ever and was read as this run's verdict. Markers are now swept on
+either kind, and an abort only counts if it was written after the run started.
+
+### Captured tooltips are normalised, not stored raw
+
+The hook asks the game for its **detailed** tooltip — the one a player sees holding Ctrl —
+because that is the view carrying every number. It comes back annotated with the range each stat
+could have rolled in ("+21% Physical Damage [16-24]") and full of colour codes. Upstream strips
+both before storing, in `ItemReplicaParser`:
+
+```csharp
+Regex.Replace(Regex.Replace(text.Trim(), @"(\^.?)", ""), @" (\[|\().+(\]|\))$", "")
+```
+
+This port had been storing the raw text, so its cards showed ranges the Windows tool does not,
+and the game does not either. The same two regexes now run on capture, together with upstream's
+rule that lines beginning "Tag not found" are dropped. Rows stored before this are rewritten
+once, guarded by a marker in upstream's own settings table, because otherwise a collection keeps
+showing the old text until every item happens to be captured again.
+
+The second regex takes *any* trailing bracketed group, not only a numeric range, so
+"Bloody Pox (33% Chance when Hit)" is stored as "Bloody Pox". That is upstream's behaviour and
+is reproduced rather than corrected; the card shows the trigger separately anyway, from
+`itemskill_v2`.
+
+### The analysis pass runs itself
+
+Upstream checks `RequiresStatUpdate` at startup and runs a parse when more than fifty items lack
+a rarity, or the skills table is empty. That is not a nicety: an item with no rarity is drawn in
+the "unknown" colour instead of as the epic it is, and every record-driven filter matches
+nothing.
+
+This port had left it as `iagd stats`, to be run by hand — so a freshly merged collection sat
+there grey and unfilterable until someone read the documentation. `StatRefresh` now makes the
+same check when the host starts, on upstream's threshold, plus the case above where a re-parse
+has emptied `DatabaseItemStat_v2`. It runs in the background and reports through the same
+channel a merge uses; the collection stays usable throughout, just incompletely described. The
+command still exists for when you want it immediately.
+
+### Which description a card shows
+
+Upstream's precedence, reproduced: the captured tooltip when the item has one, the computed
+description otherwise — its `Item.tsx` renders `replicaStats` *instead of* the computed body
+stats.
+
+That order is not about fidelity of colour, it is about completeness. `ItemStatEngine` — whose
+files in this port are **byte-identical to upstream's** — returns only the fields that actually
+*roll*. So a computed description carries an affix's "4-7 Physical Damage" but not the weapon's
+own fixed "17-41 Physical Damage", and no level or attribute requirements. The captured line has
+all of it, because the game wrote it.
+
+**What made a captured tooltip look like it belonged to one character was this port storing it
+raw.** The hook asks for the detail view, which carries colour codes meaning "better or worse
+than what you have equipped" and the roll range behind each value. Upstream strips both before
+storing; so does this port now, and with that the two renderings agree. Measured against the
+game's own tooltip for a freshly looted revolver, every line matches — flavour text, class line,
+weapon damage, attack speed, the affix damage, all four modifiers, the granted skill and both
+requirements. The only lines the game shows and the card does not are its DPS comparisons
+against the equipped weapon, which are not in the captured text at all.
+
+**A new item is described the moment it lands.** Upstream stores looted items and then updates
+their rarity, level and records immediately, as long as fewer than five hundred arrived at once
+(`PlayerItemDaoImpl`, `itemsToStore.Count < 500`); only a bulk import defers to the batch. This
+port had left all of it to the batch, so a freshly looted epic was drawn in the "unknown" colour
+and showed its records' base numbers instead of what it rolled — the item that prompted this was
+the only one of 7,482 in the collection without a rarity. `NewItemDetails` now does the same work
+on import, from the stat rows already stored, so nothing re-reads the archives.
+
+**The computed description is built upstream's way too.** `ItemStatService.BuildTags` is
+reproduced in `ItemStatText`: one row per stat per record at its highest value, the seed engine's
+output replacing the numerics of base, prefix and suffix wholesale while their text rows are
+carried over, then modifier and pet rows added and numerics summed across records. This port used
+to read the roll back from `ComputedItemStat`, which is keyed by item and stat name — so where
+two records carried the same stat, one value overwrote the other and a line vanished. That table
+stays as it is for the filters, which need the values in SQL; it is no longer what the card reads.
+
+### Never ask for the same tooltip twice
+
+The hook **deletes a request file the moment it queues it**, long before an answer exists. So
+"is this item still waiting?" cannot be answered by looking at the directory — and this port was
+doing exactly that. Every pass, two seconds apart, it found the same items still lacking a
+tooltip and asked again; the game rebuilt the same twenty items on its render thread, forever.
+The hook's own log shows it plainly: ids 7463-7482 queued at 18:40:36, and the identical twenty
+queued again at 18:40:38.
+
+Upstream does not have this problem because it keeps a `ReplicaCache` of what it has asked,
+with the comment *"Don't ask for the same item twice. Esp if the user somehow gets two identical
+items in, this would infinitely loop."* The port now keeps the same set, and the service outlives
+a single pass rather than being rebuilt every two seconds, which was throwing the memory away.
+An item the game never answers for stays unanswered until the next run — upstream's trade too —
+and `Reset()` exists for the point after a parse where a previously undescribable item might
+become describable.
+
+Measured over five passes against a 7,480-item collection with the hook's delete-on-queue
+behaviour simulated: twenty requests per pass, none of them repeated.
+
+Upstream's one rejection in its own serialiser is reproduced with it: a record longer than 255
+characters cannot be reproduced by the game, so the item is skipped rather than asked about.
+
+### Asking the game for tooltips costs frames
+
+The hook answers replica requests **on the render thread**: `OnDemandSeedInfo`'s hook into
+`Engine::Render` drains up to a hundred queued requests per frame, and answering one means
+constructing a real game item and reading its tooltip. So the number of requests outstanding is
+a frame-budget decision, not a throughput one. Raising the in-flight cap to 250 to fill a merged
+collection quickly made the game stutter; it is back to 20, which at the importer's two-second
+pass is around 600 an hour of play — slow, and invisible.
+
+Upstream has no cap because its situation is different: its items arrive by looting, which
+captures the tooltip at the same moment, so a backlog of thousands never forms. This port can
+have one after a merge, and the right answer there is patience — the cards are readable
+meanwhile, because `ItemStatText` describes them from the game database.
+
+### A re-parse hides itself from the status line
+
+`iagd parse` reassigns every `id_databaseitem`, so it clears `DatabaseItemStat_v2` — the table
+every record-driven filter joins against. It does **not** clear each item's `Rarity`, and the
+"needs analysing" count was a count of null rarities. The result was a collection that reported
+nothing to do while the slot, damage-type, mastery and pet-bonus filters all silently matched
+zero items. Found on this machine's own collection, which had 29,587 parsed records and not one
+stat row. The status check now asks the table that actually gets cleared.
 
 ### Backup, import and export
 

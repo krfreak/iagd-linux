@@ -12,6 +12,12 @@ collection intact, and one written here stays loadable there. Where that constra
 it wins, because a collection can represent years of play and there is no export step to fall
 back on.
 
+**DISCLAIMER: This is not an official release of Item Assistant. It is a completely vibe-coded port that**
+**aims to reproduce the functionality of the original Windows version on Linux.**
+**Use at your own risk. This might destroy your items. Back them up.**
+**The original Item Assistant is maintained by [marius00](https://github.com/marius00). Support their effort.**
+**Do not bug them about the work in this repository nor ask them for support.**
+
 ## What works
 
 Loot capture from a running game, the full item search with upstream's filters, the collection

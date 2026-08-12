@@ -1,8 +1,6 @@
-diff --git a/src/main.c b/src/main.c
-index f7cf5e9..08e8537 100644
 --- a/src/main.c
 +++ b/src/main.c
-@@ -22,6 +22,12 @@ typedef struct {
+@@ -22,6 +22,14 @@
      BOOL no_parent;
      wchar_t **target_args;
      int target_argc;
@@ -10,18 +8,23 @@ index f7cf5e9..08e8537 100644
 +       Required for targets whose DLLs assume the host has finished initialising, and for
 +       Steam games that must be launched by Steam itself to authenticate. */
 +    wchar_t *attach_name;
++    /* Attach only once a window of this class (or title) exists, and inject into its owner. */
++    wchar_t *attach_window;
 +    DWORD attach_timeout_ms;
 +    DWORD attach_retry_ms;
  } Arguments;
  
  typedef struct {
-@@ -66,15 +72,35 @@ static void print_usage(const wchar_t *program_name) {
+@@ -66,15 +74,40 @@
      wprintf(L"  --follow-process-name   Preferred child process executable name\n");
      wprintf(L"  --no-parent             Skip parent injection; inject into child process instead\n\n");
      wprintf(L"  --                      End of injector options; pass remaining args to target\n\n");
 -    wprintf(L"Example:\n");
 +    wprintf(L"Attach mode (inject into an already-running process; no target.exe):\n");
 +    wprintf(L"  --attach-name <exe>     Wait for a running process with this image name, then inject\n");
++    wprintf(L"  --attach-window <name>  Wait for a window of this class (or title) and inject into its\n");
++    wprintf(L"                          owner. Later and safer than --attach-name: a process exists long\n");
++    wprintf(L"                          before it can accept a DLL, a window does not.\n");
 +    wprintf(L"  --attach-timeout <ms>   How long to wait for it to appear [default: 0 = forever]\n");
 +    wprintf(L"  --attach-retry <ms>     Retry interval when injection fails [default: 5000, 0 = no retry]\n\n");
 +    wprintf(L"Examples:\n");
@@ -37,36 +40,40 @@ index f7cf5e9..08e8537 100644
 +    /* Pre-scan: in attach mode there is no target executable, so the positional
 +       arguments are DLL paths starting at argv[1] rather than argv[2]. */
 +    wchar_t *attach_name = NULL;
++    wchar_t *attach_window = NULL;
 +    for (int a = 1; a < argc - 1; a++) {
 +        if (wcscmp(argv[a], L"--") == 0)
 +            break;
-+        if (wcscmp(argv[a], L"--attach-name") == 0) {
++        if (wcscmp(argv[a], L"--attach-name") == 0)
 +            attach_name = argv[a + 1];
-+            break;
-+        }
++        else if (wcscmp(argv[a], L"--attach-window") == 0)
++            attach_window = argv[a + 1];
 +    }
 +
 +    args->attach_name         = attach_name;
++    args->attach_window       = attach_window;
 +    args->attach_timeout_ms   = 0;      /* 0 = wait indefinitely */
 +    args->attach_retry_ms     = 5000;
-+    args->target_exe          = attach_name ? NULL : argv[1];
++    args->target_exe          = (attach_name || attach_window) ? NULL : argv[1];
      args->dll_paths           = NULL;
      args->dll_count           = 0;
      args->log_file            = NULL;
-@@ -92,7 +118,7 @@ static int parse_arguments(int argc, wchar_t **argv, Arguments *args) {
+@@ -92,7 +125,7 @@
      if (!args->dll_paths)
          return 0;
  
 -    int i = 2;
-+    int i = attach_name ? 1 : 2;
++    int i = (attach_name || attach_window) ? 1 : 2;
      for (; i < argc; i++) {
          if (wcscmp(argv[i], L"--") == 0) {
              args->target_args = &argv[i + 1];
-@@ -133,6 +159,12 @@ static int parse_arguments(int argc, wchar_t **argv, Arguments *args) {
+@@ -133,6 +166,14 @@
              args->follow_process_name = argv[++i];
          } else if (wcscmp(argv[i], L"--no-parent") == 0) {
              args->no_parent = TRUE;
 +        } else if (wcscmp(argv[i], L"--attach-name") == 0 && i + 1 < argc) {
++            i++;    /* already captured in the pre-scan */
++        } else if (wcscmp(argv[i], L"--attach-window") == 0 && i + 1 < argc) {
 +            i++;    /* already captured in the pre-scan */
 +        } else if (wcscmp(argv[i], L"--attach-timeout") == 0 && i + 1 < argc) {
 +            args->attach_timeout_ms = (DWORD)wcstoul(argv[++i], NULL, 10);
@@ -75,7 +82,7 @@ index f7cf5e9..08e8537 100644
          } else if (wcscmp(argv[i], L"--method") == 0 && i + 1 < argc) {
              wchar_t *method = argv[++i];
              if (wcscmp(method, L"standard") == 0)
-@@ -431,6 +463,149 @@ static DWORD poll_for_child_process(HANDLE parent_proc, DWORD parent_pid,
+@@ -431,6 +472,207 @@
      }
  }
  
@@ -118,6 +125,60 @@ index f7cf5e9..08e8537 100644
 +    return best_pid;
 +}
 +
++/*
++ * The owner of a window of this class, or failing that of this title.
++ *
++ * A process exists long before it can be injected into. A *window* is a much later event: by
++ * the time one exists the loader has finished, the CRT is initialised and the engine is up.
++ * Item Assistant on Windows targets its game this way and only this way — FindWindowEx with
++ * "Grim Dawn" as the class, then GetWindowThreadProcessId — which is why it never sprays
++ * LoadLibraryA at a game that is still starting.
++ */
++static DWORD find_process_by_window(const wchar_t *name) {
++    HWND window = NULL;
++    DWORD pid = 0;
++
++    /* By class, which is what upstream matches on. */
++    while ((window = FindWindowExW(NULL, window, name, NULL)) != NULL) {
++        GetWindowThreadProcessId(window, &pid);
++        if (pid)
++            return pid;
++    }
++
++    /* By title, so a game whose class name changes is still found. */
++    window = NULL;
++    while ((window = FindWindowExW(NULL, window, NULL, name)) != NULL) {
++        GetWindowThreadProcessId(window, &pid);
++        if (pid)
++            return pid;
++    }
++
++    return 0;
++}
++
++static DWORD wait_for_window(const wchar_t *name, DWORD timeout_ms) {
++    const DWORD interval = 1000;
++    DWORD waited = 0;
++
++    LOG_INFO(L"Waiting for a window of '%ls'...", name);
++
++    for (;;) {
++        DWORD pid = find_process_by_window(name);
++        if (pid) {
++            LOG_INFO(L"Found window '%ls' (PID: %lu)", name, pid);
++            return pid;
++        }
++        if (timeout_ms && waited >= timeout_ms) {
++            /* Not an error: the game is running and has not drawn a window yet, which is the
++               normal state for the first half-minute of a launch. */
++            LOG_INFO(L"NOT READY: no window of '%ls' after %lu ms", name, timeout_ms);
++            return 0;
++        }
++        Sleep(interval);
++        waited += interval;
++    }
++}
++
 +static DWORD wait_for_process_by_name(const wchar_t *name, DWORD timeout_ms) {
 +    const DWORD interval = 1000;
 +    DWORD waited = 0;
@@ -143,7 +204,9 @@ index f7cf5e9..08e8537 100644
 +   host is not ready yet (still loading, wrong game state) and unload itself, which is
 +   indistinguishable here from a hard failure. Retrying is what makes that recoverable. */
 +static int attach_and_inject(const Arguments *args, wchar_t **dll_paths_full) {
-+    DWORD pid = wait_for_process_by_name(args->attach_name, args->attach_timeout_ms);
++    DWORD pid = args->attach_window
++        ? wait_for_window(args->attach_window, args->attach_timeout_ms)
++        : wait_for_process_by_name(args->attach_name, args->attach_timeout_ms);
 +    if (!pid)
 +        return 1;
 +
@@ -163,7 +226,9 @@ index f7cf5e9..08e8537 100644
 +        if (GetExitCodeProcess(proc, &exit_code) && exit_code != STILL_ACTIVE) {
 +            LOG_WARN(L"Process %lu has exited; looking for a new one", pid);
 +            CloseHandle(proc);
-+            pid = wait_for_process_by_name(args->attach_name, args->attach_timeout_ms);
++            pid = args->attach_window
++                ? wait_for_window(args->attach_window, args->attach_timeout_ms)
++                : wait_for_process_by_name(args->attach_name, args->attach_timeout_ms);
 +            if (!pid)
 +                return 1;
 +            continue;
@@ -225,12 +290,35 @@ index f7cf5e9..08e8537 100644
  static void inject_into_followed_process(DWORD follow_pid, wchar_t **dll_paths, int dll_count,
                                           DWORD follow_sleep_ms, InjectionMethod method) {
      HANDLE follow_proc = OpenProcess(PROCESS_ALL_ACCESS, FALSE, follow_pid);
-@@ -521,20 +696,25 @@ int wmain(int argc, wchar_t **argv) {
+@@ -507,6 +749,20 @@
+     CloseHandle(follow_proc);
+ }
+ 
++#ifdef IAGD_NO_CONSOLE
++/*
++ * With -mwindows the linker looks for wWinMain, and the process never asks Windows (or Wine)
++ * for a console. __argc/__wargv are the same arguments wmain would have received, so this is
++ * a different door into the same program rather than a second one.
++ */
++int wmain(int argc, wchar_t **argv);
++
++int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR command_line, int show) {
++    (void)instance; (void)previous; (void)command_line; (void)show;
++    return wmain(__argc, __wargv);
++}
++#endif
++
+ int wmain(int argc, wchar_t **argv) {
+     Arguments args;
+ 
+@@ -521,20 +777,27 @@
      }
  
      LOG_INFO(L"Proton DLL Injector v%hs", VERSION);
 -    LOG_INFO(L"Target: %ls", args.target_exe);
-+    if (args.attach_name)
++    if (args.attach_window)
++        LOG_INFO(L"Attach mode: waiting for a window of '%ls'", args.attach_window);
++    else if (args.attach_name)
 +        LOG_INFO(L"Attach mode: waiting for '%ls'", args.attach_name);
 +    else
 +        LOG_INFO(L"Target: %ls", args.target_exe);
@@ -243,7 +331,7 @@ index f7cf5e9..08e8537 100644
 -        LOG_ERROR(L"Invalid target executable path");
 -        return 1;
 -    }
-+    if (!args.attach_name) {
++    if (!args.attach_name && !args.attach_window) {
 +        if (!GetFullPathNameW(args.target_exe, MAX_PATH, target_exe_full, NULL)) {
 +            LOG_ERROR(L"Invalid target executable path");
 +            return 1;
@@ -259,11 +347,11 @@ index f7cf5e9..08e8537 100644
      }
  
      wchar_t **dll_paths_full = (wchar_t **)malloc(args.dll_count * sizeof(wchar_t *));
-@@ -567,6 +747,14 @@ int wmain(int argc, wchar_t **argv) {
+@@ -567,6 +830,14 @@
          }
      }
  
-+    if (args.attach_name) {
++    if (args.attach_name || args.attach_window) {
 +        int rc = attach_and_inject(&args, dll_paths_full);
 +        for (int i = 0; i < args.dll_count; i++) free(dll_paths_full[i]);
 +        free(dll_paths_full);

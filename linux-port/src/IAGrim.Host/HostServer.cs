@@ -88,7 +88,12 @@ public sealed class HostServer : IAsyncDisposable {
         AutoAttach = Bridge is null ? null : new AutoAttachService(Bridge);
         _importer = LootImporter.RunAsync(Bridge, collection, events, transfers,
                                           GameClock.StartTime, () => Settings, AutoAttach,
-                                          _shutdown.Token);
+                                          Paths, _shutdown.Token);
+
+        // Rarity, level requirements and the game's stat rows, when the collection is missing
+        // them. Upstream does the same check at startup rather than waiting to be asked.
+        _ = StatRefresh.RunIfNeededAsync(LinuxPaths.DatabaseFile,
+                                         Settings.GameDir ?? Paths?.GameDir, events, _shutdown.Token);
         _requestLoop = RunAsync(api);
     }
 

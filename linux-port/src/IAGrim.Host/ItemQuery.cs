@@ -26,6 +26,12 @@ public sealed record ItemQuery {
     /// <summary>Items whose base+prefix+suffix combination occurs more than once.</summary>
     public bool DuplicatesOnly { get; init; }
 
+    /// <summary>
+    /// Upstream's "Order By Level" checkbox: level first, then name. Off, the order is name then
+    /// id. Both ascending — see PlayerItemDaoImpl.SearchForItems.
+    /// </summary>
+    public bool OrderByLevel { get; init; }
+
     /// <summary>Looted in the last 12 hours, matching upstream's window.</summary>
     public bool RecentOnly { get; init; }
 

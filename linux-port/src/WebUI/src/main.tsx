@@ -1,17 +1,27 @@
 import { render } from 'preact';
 import { useEffect, useState, useCallback, useRef } from 'preact/hooks';
 import {
-  api, subscribe, ItemSummary, ItemDetail, HostStatus, HostEvent,
+  api, subscribe, ItemSummary, ItemCard as ItemCardData, ItemDetail, HostStatus, HostEvent,
   ItemFilters, RARITIES, LANGUAGE_NAMES,
   CollectionEntry, SetEntry, Settings, FilterCatalogue, FilterGroup, ModInfo, TransferTarget,
   MergePreview, MergeProgressEvent,
 } from './api';
-import { GrimText, stripGrimText } from './GrimText';
+import { GrimText, ReplicaLine, stripGrimText } from './GrimText';
 import './style.css';
 
 const PAGE_SIZE = 60;
 
-type Tab = 'items' | 'collection' | 'sets' | 'settings';
+/**
+ * The window's own tabs, which upstream draws in WinForms around its embedded browser.
+ *
+ * "Grim Dawn" is upstream's name for the tab holding the game installation and its mod
+ * databases; "Online" is cloud backup and buddy sharing, which this port does not implement yet
+ * and which says so rather than being absent.
+ */
+type Tab = 'items' | 'online' | 'settings' | 'grimdawn';
+
+/** The tabs inside the item view, which upstream draws in the web page itself. */
+type View = 'items' | 'collections' | 'sets' | 'help';
 
 function StatusBar({ status }: { status: HostStatus | null }) {
   if (!status) return <div class="status status--warn">Connecting to iagd-host…</div>;
@@ -74,51 +84,111 @@ function StatusBar({ status }: { status: HostStatus | null }) {
   );
 }
 
-function ItemCard({ item, selected, onSelect }: {
-  item: ItemSummary; selected: boolean; onSelect: () => void;
+/**
+ * One item, rendered the way upstream renders it: icon, name in its rarity colour, the tooltip
+ * the game itself produced, then the level requirement and the transfer links along the bottom.
+ *
+ * The stat text comes from the hook, which captures what Grim Dawn drew. An item that arrived
+ * any other way — merged in, imported from GD Stash — has no captured tooltip, and shows its
+ * name, rarity and level with the body left empty until the game renders it once.
+ */
+/**
+ * Tooltip rows upstream does not draw: 3, 4, 5, 6, 64 and 77 are the name and slot lines its
+ * header already shows, and 35 is "[Release Ctrl to Hide Details]", which is a prompt to the
+ * player standing in front of the game rather than a property of the item.
+ */
+const HIDDEN_STAT_TYPES = new Set([3, 4, 5, 6, 35, 64, 77]);
+
+function ItemCard({ card, selected, onSelect, onTransfer, transferring }: {
+  card: ItemCardData;
+  selected: boolean;
+  onSelect: () => void;
+  onTransfer: (all: boolean) => void;
+  transferring: boolean;
 }) {
+  const { item, stats, skill, copies } = card;
   const icon = api.iconUrl(item.icon);
-  // A colour stripe down the edge, so rarity is scannable without reading. The name already
-  // carries the game's own colour codes, but only for items whose tooltip was captured.
-  const rarity = item.rarity ? ` card--${item.rarity.toLowerCase()}` : '';
+  const rarity = (item.rarity ?? 'unknown').toLowerCase();
+
+  // Rows the tooltip repeats from the header, and the game's own "[Release Ctrl to Hide
+  // Details]" prompt. Upstream hides exactly these (ReplicaStat.css) rather than showing a
+  // card that says the item's name three times.
+  const body = stats.filter((s) => !HIDDEN_STAT_TYPES.has(s.textClass));
+
   return (
-    <button class={`card${rarity} ${selected ? 'card--selected' : ''}`} onClick={onSelect}>
-      <div class="card__icon">
-        {icon
-          ? <img src={icon} alt="" loading="lazy" />
-          : <div class="card__icon--missing" />}
+    <article
+      class={`item item--${rarity} ${selected ? 'item--selected' : ''}`}
+      onClick={onSelect}
+    >
+      <div class="item__icon">
+        {icon ? <img src={icon} alt="" loading="lazy" /> : <div class="item__icon--missing" />}
       </div>
-      <div class="card__body">
-        <div class="card__name"><GrimText text={item.name} /></div>
-        <div class="card__meta">
-          {item.stackCount > 1 && <span class="card__stack">×{item.stackCount}</span>}
-          {item.level > 0 && <span>lvl {item.level}</span>}
-          {/* Double rares are the ones worth spotting; a single rare affix is unremarkable. */}
-          {item.prefixRarity > 1 && (
-            <span class="card__badge" title={`${item.prefixRarity} rare affixes`}>
-              {'\u2605'.repeat(item.prefixRarity)}
-            </span>
-          )}
-          {item.itemClass && <span class="card__class">{item.itemClass}</span>}
+
+      <div class="item__text">
+        <div class={`item__name item__name--${rarity}`}>
+          {/* Upstream strips the game's colour codes from the name and colours the whole of it
+              by rarity, so a Mythical reads as one purple name rather than two colours. */}
+          {stripGrimText(item.name)}
+          {/* Upstream calls a green with two rare affixes a DoubleRare and it is the thing
+              worth spotting in a list; one rare affix is unremarkable but still marked. */}
+          {item.prefixRarity === 2 && <span class="item__rare"> (DoubleRare)</span>}
+          {item.prefixRarity === 1 && <span class="item__rare"> (Rare)</span>}
         </div>
+
+        {item.stackCount > 1 && <div class="item__stack">×{item.stackCount}</div>}
+
+        <ul class="item__stats">
+          {body.map((stat, index) => (
+            <li key={index} class={`stat stat--class-${stat.textClass}`}>
+              <ReplicaLine text={stat.text} />
+            </li>
+          ))}
+        </ul>
+
+        {skill && (
+          <div class="item__skill">
+            <div class="item__skill-name">{skill.name ?? 'Granted Skill'}</div>
+            {skill.description && <div class="item__skill-text">{skill.description}</div>}
+          </div>
+        )}
       </div>
-    </button>
+
+      {/* One row, so the links and the level cannot land on top of each other on a card
+          narrow enough that both want the same space. */}
+      <footer class="item__footer">
+        <span class="item__links">
+          {copies > 1 && (
+            <a onClick={(e) => { e.stopPropagation(); onTransfer(true); }}>
+              Transfer all ({copies})
+            </a>
+          )}
+          <a onClick={(e) => { e.stopPropagation(); onTransfer(false); }}>
+            {transferring ? 'Transferring…' : copies > 1 ? 'Compare & Transfer' : 'Transfer to Stash'}
+          </a>
+        </span>
+        <span class="item__level">
+          {item.level > 0 ? `Level Requirement: ${item.level}` : 'Level Requirement: Any'}
+        </span>
+      </footer>
+    </article>
   );
 }
 
 /**
- * The filter row.
+ * The filter sidebar, down the left of the item view.
  *
- * The rarity labels shown are the *game's* words, while the values sent are IA's internal
- * colours — a player looking for legendaries should not have to know that IA calls them
- * "Epic". See api.ts RARITIES.
+ * Upstream's five collapsible panels — Damage, Damage over Time, Misc, Resistances, Classes —
+ * each a column of checkboxes. The contents come from the host so there is one definition of
+ * what "Fire" means; see api.ts FilterCatalogue.
  */
-function FilterBar({ filters, onChange, catalogue, mods }: {
+function FilterSidebar({ filters, onChange, catalogue }: {
   filters: ItemFilters;
   onChange: (next: ItemFilters) => void;
   catalogue: FilterCatalogue | null;
-  mods: ModInfo[];
 }) {
+  // Damage open, the rest closed: that is how upstream starts, and five open panels would be
+  // longer than any window.
+  const [open, setOpen] = useState<Record<string, boolean>>({ damage: true });
   const patch = (next: Partial<ItemFilters>) => onChange({ ...filters, ...next });
 
   // A stat group is on when its exact field set is already among the active groups. Matching on
@@ -127,11 +197,10 @@ function FilterBar({ filters, onChange, catalogue, mods }: {
   const key = (fields: string[]) => fields.join(',');
   const activeGroups = new Set((filters.has ?? []).map(key));
 
-  const statChip = (group: FilterGroup) => {
+  const statBox = (group: FilterGroup) => {
     const on = activeGroups.has(key(group.fields));
     return (
-      <label key={group.label} class={`chip chip--damage ${on ? 'chip--on' : ''}`}
-             title={group.fields.join(', ')}>
+      <label key={group.label} class="check" title={group.fields.join(', ')}>
         <input
           type="checkbox"
           checked={on}
@@ -141,120 +210,171 @@ function FilterBar({ filters, onChange, catalogue, mods }: {
             patch({ has: checked ? [...rest, group.fields] : rest.length ? rest : undefined });
           }}
         />
-        {group.label}
+        <span>{group.label}</span>
       </label>
     );
   };
 
-  const toggle = (key: keyof ItemFilters, label: string, title?: string) => (
-    <label class="chip" title={title}>
+  const toggleBox = (field: keyof ItemFilters, label: string, title?: string) => (
+    <label key={field} class="check" title={title}>
       <input
         type="checkbox"
-        checked={Boolean(filters[key])}
-        onChange={(e) => patch({ [key]: (e.target as HTMLInputElement).checked })}
+        checked={Boolean(filters[field])}
+        onChange={(e) => patch({ [field]: (e.target as HTMLInputElement).checked })}
       />
-      {label}
+      <span>{label}</span>
     </label>
   );
 
-  const active =
-    Object.entries(filters).filter(([key, value]) =>
-      key !== 'q' && value !== undefined && value !== '' && value !== false && value !== 0).length;
+  const panel = (id: string, label: string, children: preact.ComponentChildren) => (
+    <section class={`panel-group ${open[id] ? 'panel-group--open' : ''}`}>
+      <button class="panel-group__head" onClick={() => setOpen((o) => ({ ...o, [id]: !o[id] }))}>
+        <span>{label}</span>
+        <span class="panel-group__chevron">{open[id] ? '\u2303' : '\u2304'}</span>
+      </button>
+      {open[id] && <div class="panel-group__body">{children}</div>}
+    </section>
+  );
+
+  if (!catalogue) return <aside class="sidebar" />;
 
   return (
-    <div class="filters">
-      {/* Only worth showing when there is a choice to make. */}
-      {mods.length > 1 && (
-        <select
-          class="filters__select"
-          value={filters.mod ?? ''}
-          onChange={(e) => onChange({ ...filters, mod: (e.target as HTMLSelectElement).value })}
-          title="Items are partitioned by mod; each has its own stash in game"
-        >
-          {mods.map((m) => (
-            <option key={m.name} value={m.name}>
-              {m.name === '' ? 'Vanilla' : m.name}{m.items > 0 ? ` (${m.items})` : ''}
-            </option>
-          ))}
-        </select>
-      )}
+    <aside class="sidebar">
+      {panel('damage', 'Damage', catalogue.damage.map(statBox))}
+      {panel('dot', 'Damage over Time', catalogue.damageOverTime.map(statBox))}
+      {panel('misc', 'Misc', (
+        <>
+          {catalogue.misc.map(statBox)}
+          {/* Upstream keeps these in the same panel as the stat checkboxes above. */}
+          {toggleBox('grantsSkill', 'Grants Skill')}
+          {toggleBox('summoner', 'Grants Summon Skill')}
+          {toggleBox('hasPetBonus', 'Has Pet Bonus')}
+          {toggleBox('petScope', 'Pet Bonuses', 'Match the stat filters against the pet, not the player')}
+          {toggleBox('retaliation', 'Retaliation')}
+          {toggleBox('socketed', 'With components')}
+          {toggleBox('duplicates', 'Duplicates Only')}
+          {toggleBox('recent', 'Recent Only')}
+        </>
+      ))}
+      {panel('resist', 'Resistances', catalogue.resistances.map(statBox))}
+      {panel('classes', 'Classes', catalogue.classes.map((c) => {
+        const on = (filters.mastery ?? []).includes(c.id);
+        return (
+          <label key={c.id} class="check">
+            <input
+              type="checkbox"
+              checked={on}
+              onChange={(e) => {
+                const checked = (e.target as HTMLInputElement).checked;
+                const rest = (filters.mastery ?? []).filter((m) => m !== c.id);
+                patch({ mastery: checked ? [...rest, c.id] : rest.length ? rest : undefined });
+              }}
+            />
+            <span>{c.name}</span>
+          </label>
+        );
+      }))}
+    </aside>
+  );
+}
 
-      <select
-        class="filters__select"
-        value={filters.rarity ?? ''}
-        onChange={(e) => patch({ rarity: (e.target as HTMLSelectElement).value || undefined })}
-      >
-        <option value="">Any rarity</option>
-        {RARITIES.map((r) => (
-          <option key={r.value} value={r.value} title={r.hint}>{r.label}</option>
-        ))}
-      </select>
+/**
+ * The row above the item list: search, ordering, the two dropdowns and the level range.
+ *
+ * Upstream draws this in WinForms above its browser control. The dropdown contents are the
+ * host's copy of its UIHelper tables, checked by scripts/verify-slot-filters.sh.
+ */
+function Toolbar({ filters, onChange, catalogue, mods, query, onQuery, searchRef }: {
+  filters: ItemFilters;
+  onChange: (next: ItemFilters) => void;
+  catalogue: FilterCatalogue | null;
+  mods: ModInfo[];
+  query: string;
+  onQuery: (value: string) => void;
+  searchRef: preact.RefObject<HTMLInputElement>;
+}) {
+  const patch = (next: Partial<ItemFilters>) => onChange({ ...filters, ...next });
 
-      <select
-        class="filters__select"
-        value={String(filters.prefixRarity ?? 0)}
-        onChange={(e) => patch({ prefixRarity: Number((e.target as HTMLSelectElement).value) || undefined })}
-        title="Number of Rare affixes — a double-rare green is the sought-after one"
-      >
-        <option value="0">Any affixes</option>
-        <option value="1">1+ rare affix</option>
-        <option value="2">Double rare</option>
-      </select>
+  // The selected rarity is a (colour, rare-affix count) pair, since three entries share "Green".
+  const rarityValue = `${filters.rarity ?? ''}/${filters.prefixRarity ?? 0}`;
+  const slotValue = (filters.slot ?? []).join(',');
 
-      <label class="filters__range" title="Level requirement — needs 'iagd stats' to have run">
-        lvl
+  return (
+    <div class="toolbar">
+      <input
+        ref={searchRef}
+        class="toolbar__search"
+        type="search"
+        value={query}
+        onInput={(e) => onQuery((e.target as HTMLInputElement).value)}
+      />
+
+      <label class="toolbar__check">
         <input
-          type="number" min="0" max="120" placeholder="min"
-          value={filters.minLevel ?? ''}
-          onInput={(e) => patch({ minLevel: Number((e.target as HTMLInputElement).value) || undefined })}
+          type="checkbox"
+          checked={Boolean(filters.orderByLevel)}
+          onChange={(e) => patch({ orderByLevel: (e.target as HTMLInputElement).checked })}
         />
-        –
-        <input
-          type="number" min="0" max="120" placeholder="max"
-          value={filters.maxLevel ?? ''}
-          onInput={(e) => patch({ maxLevel: Number((e.target as HTMLInputElement).value) || undefined })}
-        />
+        <span>Order By Level</span>
       </label>
 
       <select
-        class="filters__select"
-        value={filters.mastery?.[0] ?? ''}
+        class="toolbar__select"
+        value={rarityValue}
         onChange={(e) => {
-          const value = (e.target as HTMLSelectElement).value;
-          patch({ mastery: value ? [value] : undefined });
+          const [rarity, prefix] = (e.target as HTMLSelectElement).value.split('/');
+          patch({ rarity: rarity || undefined, prefixRarity: Number(prefix) || undefined });
         }}
-        title="Items granting skill bonuses to a mastery"
       >
-        <option value="">Any mastery</option>
-        {(catalogue?.classes ?? []).map((c) => (
-          <option key={c.id} value={c.id}>+{c.name}</option>
+        {(catalogue?.rarities ?? []).map((r) => (
+          <option key={r.tag} value={`${r.rarity ?? ''}/${r.prefixRarity}`}>{r.label}</option>
         ))}
       </select>
 
-      {toggle('grantsSkill', 'Grants skill', 'Includes proc skills, as upstream does')}
-      {toggle('summoner', 'Summons pet')}
-      {toggle('retaliation', 'Retaliation')}
-      {toggle('hasPetBonus', 'Pet bonus', 'Grants any pet bonus')}
-      {toggle('petScope', 'On the pet',
-              'Applies the damage filters to the pet instead of you')}
-      {toggle('socketed', 'Socketed')}
-      {toggle('duplicates', 'Duplicates')}
-      {toggle('recent', 'Last 12h')}
+      <select
+        class="toolbar__select"
+        value={slotValue}
+        onChange={(e) => {
+          const value = (e.target as HTMLSelectElement).value;
+          const option = (catalogue?.slots ?? []).find((s) => s.itemClasses.join(',') === value);
+          patch({
+            slot: value ? value.split(',') : undefined,
+            slotInverse: option?.inverse || undefined,
+          });
+        }}
+      >
+        {(catalogue?.slots ?? []).map((s) => (
+          <option key={s.tag} value={s.itemClasses.join(',')}>{s.label}</option>
+        ))}
+      </select>
 
-      {catalogue && (
-        <>
-          <div class="filters__group"><span>Damage</span>{catalogue.damage.map(statChip)}</div>
-          <div class="filters__group"><span>Over time</span>{catalogue.damageOverTime.map(statChip)}</div>
-          <div class="filters__group"><span>Resist</span>{catalogue.resistances.map(statChip)}</div>
-          <div class="filters__group"><span>Other</span>{catalogue.misc.map(statChip)}</div>
-        </>
-      )}
+      <select
+        class="toolbar__select"
+        value={filters.mod ?? ''}
+        onChange={(e) => patch({ mod: (e.target as HTMLSelectElement).value })}
+        title="Items are partitioned by mod; each has its own stash in game"
+      >
+        <option value="">No mod</option>
+        {mods.filter((m) => m.name).map((m) => (
+          <option key={m.name} value={m.name}>{m.name}</option>
+        ))}
+      </select>
 
-      {active > 0 && (
-        <button class="filters__clear" onClick={() => onChange({ q: filters.q })}>
-          Clear {active} filter{active === 1 ? '' : 's'}
-        </button>
-      )}
+      <fieldset class="toolbar__level">
+        <legend>Level</legend>
+        <input
+          type="text"
+          inputMode="numeric"
+          value={filters.minLevel ?? ''}
+          onInput={(e) => patch({ minLevel: Number((e.target as HTMLInputElement).value) || undefined })}
+        />
+        <input
+          type="text"
+          inputMode="numeric"
+          value={filters.maxLevel ?? ''}
+          onInput={(e) => patch({ maxLevel: Number((e.target as HTMLInputElement).value) || undefined })}
+        />
+      </fieldset>
     </div>
   );
 }
@@ -744,12 +864,10 @@ function ItemPanel({ id, transfer, onSend, onCancel, onClose, mods, allowRetarge
       </div>
 
       <div class="panel__stats">
-        {detail.stats.map((stat, index) => (
-          <div key={index} class={`stat stat--class-${stat.textClass}`}>
-            <GrimText text={stat.text} />
-          </div>
-        ))}
-
+        {/* Not the stat lines: the card behind this panel already shows them, and printing the
+            same tooltip twice on one screen is how the old overlay earned its reputation. What
+            is here is what the card cannot do — choosing where an item goes, and following the
+            transfer once it is queued. */}
         {detail.skill && (
           <div class="skill">
             <div class="skill__head">
@@ -830,12 +948,13 @@ function App() {
   const [status, setStatus] = useState<HostStatus | null>(null);
   const [query, setQuery] = useState('');
   const [tab, setTab] = useState<Tab>('items');
+  const [view, setView] = useState<View>('items');
   const [filters, setFilters] = useState<ItemFilters>({});
   const [catalogue, setCatalogue] = useState<FilterCatalogue | null>(null);
   const [mods, setMods] = useState<ModInfo[]>([]);
   // Choosing a target stash is gated on the same setting upstream gates its stash picker with.
   const [allowRetarget, setAllowRetarget] = useState(false);
-  const [items, setItems] = useState<ItemSummary[]>([]);
+  const [items, setItems] = useState<ItemCardData[]>([]);
   const [total, setTotal] = useState(0);
   // Deep link: #item=7 opens that item directly, so a specific item can be linked to or
   // reopened after a reload.
@@ -889,7 +1008,7 @@ function App() {
 
         case 'itemLooted': {
           setStatus((s) => (s ? { ...s, itemCount: s.itemCount + 1 } : s));
-          setToast(`Looted ${stripGrimText(event.data.name)}`);
+          setToast(`Looted ${stripGrimText(event.data.item.name)}`);
           // Only fold it into the visible list when nothing is narrowing it; otherwise the
           // grid would contradict its own filters. The host does not re-run the query per
           // event, so a match cannot be tested here.
@@ -901,7 +1020,7 @@ function App() {
         }
 
         case 'itemRemoved':
-          setItems((current) => current.filter((i) => i.id !== event.data.id));
+          setItems((current) => current.filter((c) => c.item.id !== event.data.id));
           setTotal((t) => Math.max(0, t - 1));
           setSelected((current) => (current === event.data.id ? null : current));
           break;
@@ -961,108 +1080,238 @@ function App() {
     return () => clearTimeout(handle);
   }, [toast]);
 
+  const transferItem = async (card: ItemCardData, all: boolean) => {
+    // "Transfer all" sends every copy the card stands for; otherwise just the one it shows.
+    const ids = all ? card.duplicates : [card.item.id];
+    for (const id of ids) {
+      setTransfers((c) => ({ ...c, [id]: { transferId: null, message: 'Queueing…', pending: true } }));
+      const result = await api.transfer(id);
+      setTransfers((c) => ({
+        ...c,
+        [id]: 'transferId' in result
+          ? { transferId: result.transferId, message: 'Queued — open the transfer stash in game.', pending: true }
+          : { transferId: null, message: result.message, pending: false },
+      }));
+      if (!('transferId' in result)) { setToast(result.message); break; }
+    }
+  };
+
   return (
     <div class="app">
-      <header class="app__header">
-        <h1>Item Assistant</h1>
-        <input
-          ref={searchRef}
-          class="search"
-          type="search"
-          placeholder={tab === 'sets' ? 'Search sets…  (/)' : 'Search name or stat line…  (/)'}
-          value={query}
-          onInput={(e) => setQuery((e.target as HTMLInputElement).value)}
-        />
-        <StatusBar status={status} />
+      {/* The window's own tabs, which upstream draws around its embedded browser. */}
+      <nav class="tabstrip">
+        {([
+          ['items', 'Items'],
+          ['online', 'Online'],
+          ['settings', 'Settings'],
+          ['grimdawn', 'Grim Dawn'],
+        ] as [Tab, string][]).map(([value, label]) => (
+          <button
+            key={value}
+            class={`tabstrip__tab ${tab === value ? 'tabstrip__tab--active' : ''}`}
+            onClick={() => setTab(value)}
+          >
+            {label}
+          </button>
+        ))}
+      </nav>
 
-        <nav class="tabs">
-          {([
-            ['items', 'My items'],
-            ['collection', 'Collection'],
-            ['sets', 'Sets'],
-            ['settings', 'Settings'],
-          ] as [Tab, string][]).map(([value, label]) => (
-            <button
-              key={value}
-              class={`tab ${tab === value ? 'tab--active' : ''}`}
-              onClick={() => setTab(value)}
-            >
-              {label}
-            </button>
-          ))}
-        </nav>
+      <div class="app__body">
+        {tab === 'items' && (
+          <div class={`workspace ${selected !== null ? 'workspace--panel' : ''}`}>
+            <FilterSidebar filters={filters} onChange={setFilters} catalogue={catalogue} />
 
-        {(tab === 'items' || tab === 'collection') && <FilterBar filters={filters} onChange={setFilters} catalogue={catalogue} mods={mods} />}
-      </header>
+            <div class="workspace__main">
+              <Toolbar
+                filters={filters}
+                onChange={setFilters}
+                catalogue={catalogue}
+                mods={mods}
+                query={query}
+                onQuery={setQuery}
+                searchRef={searchRef}
+              />
 
-      <main class="app__main">
-        {tab === 'collection' && <CollectionView filters={search} />}
-        {tab === 'sets' && <SetsView query={query} />}
+              {/* Below here is what upstream renders in the browser control. */}
+              <div class="webview">
+                <header class="webnav">
+                  <nav>
+                    {([
+                      ['items', 'Items'],
+                      ['collections', 'Collections'],
+                      ['sets', 'Sets'],
+                      ['help', 'Help'],
+                    ] as [View, string][]).map(([value, label]) => (
+                      <a
+                        key={value}
+                        class={view === value ? 'webnav--active' : ''}
+                        onClick={() => setView(value)}
+                      >
+                        {label}
+                      </a>
+                    ))}
+                    <a onClick={() => window.open('https://grimdawn.evilsoft.net/enchantments/', '_blank')}>
+                      Components
+                    </a>
+                    <a onClick={() => window.open('https://discord.gg/5wuCPbB', '_blank')}>Discord</a>
+                    <a onClick={() => window.open('https://www.patreon.com/itemassistant', '_blank')}>
+                      Patreon
+                    </a>
+                  </nav>
+
+                  {view === 'items' && (
+                    <button
+                      class="webnav__clipboard"
+                      onClick={() => navigator.clipboard?.writeText(
+                        items.map((c) => stripGrimText(c.item.name)).join('\n'))}
+                    >
+                      Copy to Clipboard
+                      <span>Displaying {items.length}/{total}</span>
+                    </button>
+                  )}
+                </header>
+
+                <main class="webview__body">
+                  {view === 'collections' && <CollectionView filters={search} />}
+                  {view === 'sets' && <SetsView query={query} />}
+                  {view === 'help' && (
+                    <div class="help">
+                      <h2>Help</h2>
+                      <p>
+                        Items are captured by a hook inside Grim Dawn, which the port attaches
+                        once the game is running. The status line at the bottom says whether that
+                        has happened.
+                      </p>
+                      <p>
+                        Transfers go the other way: an item is queued here and appears the next
+                        time you open the transfer stash in game.
+                      </p>
+                      <p>
+                        Upstream's help page is served from the internet and is not reproduced
+                        here.
+                      </p>
+                    </div>
+                  )}
+
+                  {view === 'items' && (
+                    <section class="items">
+                      {items.length === 0 && (
+                        <div class="items__empty">
+                          {query || filteredRef.current
+                            ? 'Nothing matching those filters.'
+                            : 'No items yet — loot something into your stash.'}
+                        </div>
+                      )}
+                      {items.map((card) => (
+                        <ItemCard
+                          key={card.item.id}
+                          card={card}
+                          selected={selected === card.item.id}
+                          onSelect={() => setSelected(card.item.id)}
+                          onTransfer={(all) => transferItem(card, all)}
+                          transferring={Boolean(transfers[card.item.id]?.pending)}
+                        />
+                      ))}
+                      {items.length < total && (
+                        <button class="button items__more" onClick={() => load(search, true)}>
+                          Load more ({items.length} of {total})
+                        </button>
+                      )}
+                    </section>
+                  )}
+                </main>
+              </div>
+            </div>
+
+            {selected !== null && (
+              <ItemPanel
+                id={selected}
+                onClose={() => setSelected(null)}
+                mods={mods}
+                allowRetarget={allowRetarget}
+                transfer={transfers[selected]}
+                onSend={async (id, target) => {
+                  setTransfers((c) => ({
+                    ...c, [id]: { transferId: null, message: 'Queueing…', pending: true },
+                  }));
+                  const result = await api.transfer(id, target);
+                  if ('transferId' in result) {
+                    setTransfers((c) => ({
+                      ...c,
+                      [id]: {
+                        transferId: result.transferId,
+                        message: 'Queued — open the transfer stash in game.',
+                        pending: true,
+                      },
+                    }));
+                  } else {
+                    // Refused outright (game not running, no hook): nothing was queued.
+                    setTransfers((c) => ({
+                      ...c, [id]: { transferId: null, message: result.message, pending: false },
+                    }));
+                  }
+                }}
+                onCancel={async (transferId) => {
+                  const result = await api.cancelTransfer(transferId);
+                  setTransfers((c) => ({
+                    ...c,
+                    [selected]: { transferId: null, message: result.message, pending: false },
+                  }));
+                }}
+              />
+            )}
+          </div>
+        )}
+
         {tab === 'settings' && <SettingsView onSaved={setToast} progress={mergeProgress} />}
 
-        {tab === 'items' && (
-          <section class="grid">
-            {items.length === 0 && (
-              <div class="grid__empty">
-                {query || filteredRef.current
-                  ? 'Nothing matching those filters.'
-                  : 'No items yet — loot something into your stash.'}
-              </div>
-            )}
-            {items.map((item) => (
-              <ItemCard
-                key={item.id}
-                item={item}
-                selected={selected === item.id}
-                onSelect={() => setSelected(item.id)}
-              />
-            ))}
-            {items.length < total && (
-              <button class="button grid__more" onClick={() => load(search, true)}>
-                Load more ({items.length} of {total})
-              </button>
-            )}
-          </section>
+        {tab === 'online' && (
+          <div class="tabpage">
+            <h2>Online</h2>
+            <p>
+              Upstream keeps cloud backup and buddy sharing here. Neither is implemented in this
+              port yet, so nothing is being sent anywhere.
+            </p>
+            <p>
+              Your collection lives in one file, and <code>iagd backup</code> copies it. The
+              Settings tab can merge another collection into this one.
+            </p>
+          </div>
         )}
 
-        {tab === 'items' && selected !== null && (
-          <ItemPanel
-            id={selected}
-            onClose={() => setSelected(null)}
-            mods={mods}
-            allowRetarget={allowRetarget}
-            transfer={transfers[selected]}
-            onSend={async (id, target) => {
-              setTransfers((c) => ({
-                ...c, [id]: { transferId: null, message: 'Queueing…', pending: true },
-              }));
-              const result = await api.transfer(id, target);
-              if ('transferId' in result) {
-                setTransfers((c) => ({
-                  ...c,
-                  [id]: {
-                    transferId: result.transferId,
-                    message: 'Queued — open the transfer stash in game.',
-                    pending: true,
-                  },
-                }));
-              } else {
-                // Refused outright (game not running, no hook): nothing was queued.
-                setTransfers((c) => ({
-                  ...c, [id]: { transferId: null, message: result.message, pending: false },
-                }));
-              }
-            }}
-            onCancel={async (transferId) => {
-              const result = await api.cancelTransfer(transferId);
-              setTransfers((c) => ({
-                ...c,
-                [selected]: { transferId: null, message: result.message, pending: false },
-              }));
-            }}
-          />
+        {tab === 'grimdawn' && (
+          <div class="tabpage">
+            <h2>Grim Dawn Database</h2>
+            <p>
+              Item names, icons and levels are read from the game's own archives by
+              <code>iagd parse</code>, then rolled per item by <code>iagd stats</code>.
+            </p>
+            <dl class="tabpage__facts">
+              <dt>Installation</dt><dd>{status?.gameDir ?? 'not found'}</dd>
+              <dt>Templates parsed</dt><dd>{status?.templateCount?.toLocaleString() ?? '0'}</dd>
+              <dt>Items awaiting analysis</dt><dd>{status?.itemsNeedingStats?.toLocaleString() ?? '0'}</dd>
+            </dl>
+            <h3>Mods</h3>
+            <table class="tabpage__table">
+              <thead><tr><th>Mod</th><th>Items</th></tr></thead>
+              <tbody>
+                {mods.map((m) => (
+                  <tr key={m.name}>
+                    <td>{m.name || 'Vanilla'}</td>
+                    <td>{m.items.toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
-      </main>
+      </div>
+
+      {/* The window's status bar, which upstream uses for the result count and its version. */}
+      <footer class="statusbar">
+        <span>{tab === 'items' ? `${total.toLocaleString()} matching items found` : ''}</span>
+        <StatusBar status={status} />
+      </footer>
 
       {toast && <div class="toast">{toast}</div>}
     </div>

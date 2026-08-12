@@ -64,6 +64,43 @@ export function GrimText({ text }: { text: string }): JSX.Element {
   );
 }
 
+/**
+ * A captured tooltip line, rendered the way upstream renders it.
+ *
+ * Upstream does *not* colour these by the game's `^` codes: it drops them and colours the whole
+ * line by its row type instead, keeping only `^E` and `^H`, which mark the stat label and the
+ * number at the end of a line. Following that here rather than colouring every keyword is
+ * deliberate — the two tools have to show the same item the same way, and upstream's rendering
+ * is the one players know.
+ */
+export function ReplicaLine({ text }: { text: string }): JSX.Element {
+  const parts: JSX.Element[] = [];
+  let letter = '';
+  let buffer = '';
+
+  const flush = () => {
+    if (!buffer) return;
+    parts.push(
+      <span key={parts.length} class={letter ? `letter-${letter}` : undefined}>{buffer}</span>,
+    );
+    buffer = '';
+  };
+
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === '^' && i + 1 < text.length) {
+      flush();
+      const code = text[i + 1].toUpperCase();
+      letter = code === 'E' || code === 'H' ? code : '';
+      i++;
+      continue;
+    }
+    buffer += text[i];
+  }
+  flush();
+
+  return <>{parts}</>;
+}
+
 /** Plain text, for titles and anywhere colour would be noise. */
 export function stripGrimText(input: string): string {
   return parseGrimText(input)

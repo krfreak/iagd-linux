@@ -44,6 +44,17 @@ INJECTOR="${IAGD_INJECTOR:-$WORKSPACE/build/proton-injector/bin/injector64.exe}"
 DLL="${DLL:-${IAGD_HOOK_DLL:-$LINUX_PORT/native/hook/bin/ItemAssistantHook_x64.dll}}"
 [ -f "$DLL" ] || die "hook DLL not built. Run: make -C $LINUX_PORT/native/hook"
 PROCESS_NAME="${PROCESS_NAME:-Grim Dawn.exe}"
+
+# Inject into the owner of this window, not into whatever has the right image name.
+#
+# This is how the Windows tool picks its target: FindWindowEx with "Grim Dawn" as the window
+# class, then GetWindowThreadProcessId (DllInjector/InjectionHelper.cs). The distinction is the
+# whole difference between attaching cleanly and hammering a game that is still starting: the
+# process exists within a second of launch, the window only once the loader has finished and the
+# engine is up. Targeting the process meant every attach attempt fired a LoadLibraryA remote
+# thread into a half-initialised game, over and over, which is as bad for the game as it sounds.
+WINDOW_NAME="${WINDOW_NAME:-Grim Dawn}"
+
 RETRY_MS="${RETRY_MS:-5000}"
 ATTACH_TIMEOUT_MS="${ATTACH_TIMEOUT_MS:-0}"     # 0 = wait forever
 LOG_FILE="$WORKSPACE/build/proton-injector/injector.log"
@@ -84,7 +95,7 @@ WIN_LOG="$(to_windows_path "$LOG_FILE")"
 cat <<EOF
 Attach IA hook to a running Grim Dawn
 ─────────────────────────────────────────────────────────────────────────────
-  Process   $PROCESS_NAME
+  Window    $WINDOW_NAME
   Prefix    $COMPAT_DATA
   Proton    $PROTON
   DLL       $DLL
@@ -98,7 +109,7 @@ Attach IA hook to a running Grim Dawn
 EOF
 
 CMD=("$PROTON" run "$WIN_INJECTOR" "$WIN_DLL"
-     --attach-name "$PROCESS_NAME"
+     --attach-window "$WINDOW_NAME"
      --attach-retry "$RETRY_MS"
      --attach-timeout "$ATTACH_TIMEOUT_MS"
      --log-file "$WIN_LOG" "$@")
@@ -123,6 +134,10 @@ export STEAM_COMPAT_CLIENT_INSTALL_PATH="$STEAM_ROOT"
 # same files. That reliably takes the game down, and it is exactly what happens if the DLL
 # gets renamed between runs.
 PID_BEFORE="$(ls "$BRIDGE/linuxhack/"*.PID 2>/dev/null | head -1 || true)"
+# An abort marker counts as a marker too. Sweeping only when a .PID existed left an old
+# .ABORTED lying around for ever, and the verdict at the end of this script would then report
+# "the DLL refused to attach" for a run that never injected anything.
+ABORTED_BEFORE="$(ls "$BRIDGE/linuxhack/"*.ABORTED 2>/dev/null | head -1 || true)"
 
 # A marker left behind by a previous session is stale, and a stale marker would otherwise
 # block every future attach. The pid inside it is a *Wine* pid and means nothing to Linux,
@@ -132,9 +147,9 @@ PID_BEFORE="$(ls "$BRIDGE/linuxhack/"*.PID 2>/dev/null | head -1 || true)"
 #   * the marker predates the running game -> it belongs to an earlier session
 #
 # The second case is the one that matters after a crash and restart.
-if [ -n "$PID_BEFORE" ]; then
+if [ -n "$PID_BEFORE" ] || [ -n "$ABORTED_BEFORE" ]; then
     GAME_STARTED="$(game_start_epoch)"
-    MARKER_MTIME="$(stat -c %Y "$PID_BEFORE" 2>/dev/null || echo 0)"
+    MARKER_MTIME="$(stat -c %Y "${PID_BEFORE:-$ABORTED_BEFORE}" 2>/dev/null || echo 0)"
 
     if [ -z "$GAME_STARTED" ]; then
         echo "Clearing stale hook markers (no Grim Dawn process is running)."
@@ -163,9 +178,12 @@ if [ -n "$PID_BEFORE" ] && [ "${FORCE:-0}" != "1" ]; then
     exit 0
 fi
 
-echo "Waiting for '$PROCESS_NAME'. The DLL refuses to attach while the game is loading or"
-echo "in character select, so this may retry a few times. Ctrl+C to stop."
+echo "Waiting for the '$WINDOW_NAME' window. Nothing is injected until it exists, and the DLL"
+echo "still refuses to attach at character select, so this may retry. Ctrl+C to stop."
 echo
+
+# Only markers written from here on describe this run.
+RUN_STARTED="$(date +%s)"
 
 set +e
 "${CMD[@]}"
@@ -173,12 +191,26 @@ INJECTOR_RC=$?
 set -e
 
 echo
+# The injector is linked as a GUI binary so it cannot pop a console window over the game, which
+# also means it prints nothing to a terminal. Its log is the only account of what happened.
+if [ -f "$LOG_FILE" ]; then
+    echo "Injector log (tail):"
+    tail -6 "$LOG_FILE" | sed 's/^/  /'
+    echo
+fi
+
 echo "─────────────────────────────────────────────────────────────────────────────"
 
 # The injector only reports that LoadLibrary succeeded. The authoritative signal that the
 # hook actually initialised is the .PID marker the DLL writes itself.
 PID_FILE="$(ls "$BRIDGE/linuxhack/"*.PID 2>/dev/null | head -1 || true)"
+
+# An abort marker is only this run's if it was written during it. Otherwise a leftover from an
+# earlier attempt reports a refusal that never happened.
 ABORTED="$(ls "$BRIDGE/linuxhack/"*.ABORTED 2>/dev/null | head -1 || true)"
+if [ -n "$ABORTED" ] && [ "$(stat -c %Y "$ABORTED" 2>/dev/null || echo 0)" -lt "$RUN_STARTED" ]; then
+    ABORTED=""
+fi
 
 if [ -n "$PID_FILE" ]; then
     if [ -n "$PID_BEFORE" ] && [ "$PID_BEFORE" = "$PID_FILE" ]; then
@@ -196,6 +228,11 @@ if [ -n "$PID_FILE" ]; then
     echo "  Next: watch the bridge with"
     echo "      dotnet run --project tools/probe"
     echo "  then open your stash in game."
+elif grep -q "NOT READY" "$LOG_FILE" 2>/dev/null && [ "$(stat -c %Y "$LOG_FILE" 2>/dev/null || echo 0)" -ge "$RUN_STARTED" ]; then
+    echo "NOT READY  the game window has not appeared yet"
+    echo
+    echo "  Nothing was injected. The process exists long before it can accept a DLL, so the"
+    echo "  window is what this waits for. Try again once the game has drawn one."
 elif [ -n "$ABORTED" ]; then
     echo "ABORTED  the DLL loaded but refused to attach"
     echo

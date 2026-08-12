@@ -50,6 +50,7 @@ verify:
 	@./scripts/verify-stat-filter.sh
 	@./scripts/verify-item-rarity.sh
 	@bash ./scripts/verify-filter-groups.sh
+	@bash ./scripts/verify-slot-filters.sh
 	@bash ./scripts/verify-schema.sh
 
 # A relocatable, self-contained package: AppDir + tarball, and an AppImage when appimagetool

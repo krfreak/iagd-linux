@@ -14,8 +14,15 @@ namespace IAGrim.Host;
 public sealed class CollectionService {
     private readonly string _databasePath;
 
+    /// <summary>
+    /// Renders the tooltip for items the hook never captured. Held for the life of the service
+    /// because building it reads the whole tag table, which is 19,000 rows.
+    /// </summary>
+    private readonly IAGrim.Core.ItemStats.ItemStatText _statText;
+
     public CollectionService(string databasePath) {
         _databasePath = databasePath;
+        _statText = new IAGrim.Core.ItemStats.ItemStatText(databasePath);
 
         // A database this port has never opened — most importantly, one copied from a Windows
         // IAGD install — has upstream's tables but not the few this port adds. Creating them
@@ -37,6 +44,17 @@ public sealed class CollectionService {
     /// Paged search. Paging is not decoration: the UI loads on scroll, and a full collection
     /// is thousands of rows.
     /// </summary>
+    /// <summary>
+    /// Identical items collapse into one card, as they do upstream.
+    ///
+    /// The key is upstream's, from <c>ItemOperationsUtility.MergeStackSize</c>: base record plus
+    /// prefix plus suffix. Two rolls of the same legendary are one entry offering "Transfer all
+    /// (2)" rather than two entries side by side — which is what stops a stash of forty identical
+    /// components filling the window.
+    /// </summary>
+    private const string MergeKey =
+        "IFNULL(p.baserecord,'') || '|' || IFNULL(p.PrefixRecord,'') || '|' || IFNULL(p.SuffixRecord,'')";
+
     public ItemPage Search(ItemQuery query, int skip, int take) {
         take = Math.Clamp(take, 1, 500);
         skip = Math.Max(skip, 0);
@@ -64,35 +82,86 @@ public sealed class CollectionService {
 
         int total;
         using (var count = connection.CreateCommand()) {
-            count.CommandText = $"SELECT COUNT(*) {from} WHERE {where};";
+            // Groups, not rows: the number the UI reports has to be the number of cards it can
+            // scroll through, or paging runs off the end.
+            count.CommandText = $"SELECT COUNT(*) FROM (SELECT 1 {from} WHERE {where} GROUP BY {MergeKey});";
             Bind(count, parameters);
             total = Convert.ToInt32(count.ExecuteScalar());
         }
 
+        // Upstream's ordering, from PlayerItemDaoImpl.SearchForItems: name then id, with the
+        // level in front when the user asks for it. Ascending in both cases — theirs is
+        // "ORDER BY PI.levelrequirement, PI.name, PI.Id".
+        var orderBy = query.OrderByLevel
+            ? "ORDER BY MIN(p.LevelRequirement), p.Name, MIN(p.Id)"
+            : "ORDER BY p.Name, MIN(p.Id)";
+
         using var command = connection.CreateCommand();
+        // MIN(p.Id) is not decoration: with a GROUP BY, SQLite takes the other columns from the
+        // row that produced the min, so the card describes one real item rather than a mix of
+        // several. Copies carries the rest.
         command.CommandText = $"""
-            SELECT p.Id, p.Name, p.baserecord, p.Seed, p.IsHardcore,
+            SELECT MIN(p.Id), p.Name, p.baserecord, p.Seed, p.IsHardcore,
                    COALESCE(tm.Name, tv.Name), COALESCE(tm.ItemClass, tv.ItemClass), COALESCE(tm.Quality, tv.Quality), COALESCE(tm.LevelRequirement, tv.LevelRequirement), COALESCE(tm.IconFile, tv.IconFile),
                    (SELECT rr.Text FROM ReplicaItemRow rr
                      WHERE rr.replicaitemid = r.Id AND rr.Type = 6
                      ORDER BY rr.Id LIMIT 1) AS RawName,
-                   p.Rarity, p.PrefixRarity, p.StackCount
+                   p.Rarity, p.PrefixRarity, p.StackCount,
+                   COUNT(*) AS Copies, GROUP_CONCAT(p.Id) AS Ids
             {from}
             WHERE {where}
-            ORDER BY p.LevelRequirement DESC, p.Id DESC
+            GROUP BY {MergeKey}
+            {orderBy}
             LIMIT $take OFFSET $skip;
             """;
         Bind(command, parameters);
         command.Parameters.AddWithValue("$take", take);
         command.Parameters.AddWithValue("$skip", skip);
 
-        var items = new List<ItemSummary>();
-        using var reader = command.ExecuteReader();
-        while (reader.Read()) {
-            items.Add(ReadSummary(reader));
+        var cards = new List<ItemCard>();
+        var ids = new List<long>();
+        using (var reader = command.ExecuteReader()) {
+            while (reader.Read()) {
+                var summary = ReadSummary(reader);
+                var copies = reader.GetInt32(14);
+                var duplicates = (reader.IsDBNull(15) ? "" : reader.GetString(15))
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries)
+                    .Select(long.Parse)
+                    .ToList();
+
+                cards.Add(new ItemCard(summary, [], null, copies, duplicates));
+                ids.Add(summary.Id);
+            }
         }
 
-        return new ItemPage(items, total, skip, take);
+        // The tooltip lines for the whole page in one query. Upstream renders every card fully,
+        // so fetching them per card would be one round trip per item on every scroll.
+        var stats = StatsFor(connection, ids);
+        var skills = SkillsFor(connection, ids);
+        for (var i = 0; i < cards.Count; i++) {
+            var id = cards[i].Item.Id;
+            var captured = stats.TryGetValue(id, out var lines) ? lines : [];
+
+            cards[i] = cards[i] with {
+                // Upstream's precedence: the captured tooltip when there is one, the computed
+                // description otherwise (Item.tsx renders replicaStats *instead of* bodyStats).
+                //
+                // It is the better of the two by a distance, and not because of colour. The seed
+                // engine only returns fields that *roll*, so a computed description has the
+                // affix damage but not the weapon's own "17-41 Physical Damage", and no level or
+                // attribute requirements. The captured line has everything, because the game
+                // wrote it.
+                //
+                // What made a captured tooltip look character-specific was this port storing it
+                // raw: the game's detail view carries colour codes meaning "better or worse than
+                // what you are wearing" and the roll range behind each value. Upstream strips
+                // both before storing, and so does this port now — see ReplicaService.Normalise.
+                Stats = captured.Count > 0 ? captured : Computed(connection, id),
+                Skill = skills.TryGetValue(id, out var skill) ? skill : null,
+            };
+        }
+
+        return new ItemPage(cards, total, skip, take);
     }
 
     /// <summary>
@@ -103,6 +172,15 @@ public sealed class CollectionService {
         foreach (var (key, value) in parameters) {
             command.Parameters.AddWithValue(":" + key, value);
         }
+    }
+
+    /// <summary>
+    /// One item in the shape the list uses. For a freshly looted row, which is one card by
+    /// definition — anything identical to it was already on screen under its own card.
+    /// </summary>
+    public ItemCard? Card(long id) {
+        var detail = Get(id);
+        return detail is null ? null : new ItemCard(detail.Item, detail.Stats, detail.Skill, 1, [id]);
     }
 
     public ItemDetail? Get(long id) {
@@ -189,6 +267,78 @@ public sealed class CollectionService {
     ///      "Mythical Plagueborne Revolver"), since the game composes the displayed name from
     ///      the base plus its quality tier.
     /// </summary>
+    /// <summary>
+    /// Tooltip lines for a whole page of cards in one query.
+    ///
+    /// Upstream renders every card in full, so the alternative is a round trip per card on every
+    /// scroll. The ids are inlined rather than parameterised because they are row ids this method
+    /// just read out of the database, and SQLite has a hard limit on parameter count that a page
+    /// of 500 would approach.
+    /// </summary>
+    private static Dictionary<long, List<ItemStatLine>> StatsFor(SqliteConnection connection, List<long> ids) {
+        var result = new Dictionary<long, List<ItemStatLine>>();
+        if (ids.Count == 0) return result;
+
+        using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT r.playeritemid, rr.Type, rr.Text FROM ReplicaItemRow rr
+             JOIN ReplicaItem2 r ON r.Id = rr.replicaitemid
+            WHERE r.playeritemid IN ({string.Join(",", ids)})
+            ORDER BY r.playeritemid, rr.Id;
+            """;
+
+        using var reader = command.ExecuteReader();
+        while (reader.Read()) {
+            var id = reader.GetInt64(0);
+            if (!result.TryGetValue(id, out var lines)) result[id] = lines = [];
+            lines.Add(new ItemStatLine(reader.GetInt32(1), reader.GetString(2)));
+        }
+        return result;
+    }
+
+    /// <summary>Granted skills for a page of cards. See <see cref="Get"/> for the single-item form.</summary>
+    private static Dictionary<long, ItemSkillInfo> SkillsFor(SqliteConnection connection, List<long> ids) {
+        var result = new Dictionary<long, ItemSkillInfo>();
+        if (ids.Count == 0) return result;
+
+        using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT p.Id, s.Name, s.Description, IFNULL(s.Level, 0), s.Trigger,
+                   EXISTS (SELECT 1 FROM DatabaseItemStat_v2 st
+                            WHERE st.id_databaseitem = s.id_databaseitem
+                              AND st.Stat = 'spawnObjects')
+            FROM PlayerItem p
+            JOIN DatabaseItem_v2 db ON db.baserecord = p.baserecord
+            JOIN itemskill_mapping m ON m.id_databaseitem = db.id_databaseitem
+            JOIN itemskill_v2 s ON s.id_skill = m.id_skill
+            WHERE p.Id IN ({string.Join(",", ids)});
+            """;
+
+        try {
+            using var reader = command.ExecuteReader();
+            while (reader.Read()) {
+                var id = reader.GetInt64(0);
+                if (result.ContainsKey(id)) continue;   // upstream takes the first
+                result[id] = new ItemSkillInfo(
+                    reader.IsDBNull(1) ? null : reader.GetString(1),
+                    reader.IsDBNull(2) ? null : reader.GetString(2),
+                    reader.GetInt64(3),
+                    reader.IsDBNull(4) ? null : reader.GetString(4),
+                    reader.GetInt64(5) != 0);
+            }
+        }
+        catch (SqliteException) { /* skills not parsed yet */ }
+        return result;
+    }
+
+    /// <summary>Lines computed from the game database, for an item with no captured tooltip.</summary>
+    private IReadOnlyList<ItemStatLine> Computed(SqliteConnection connection, long id) {
+        if (!_statText.Available) return [];
+        return _statText.Describe(connection, id)
+            .Select(line => new ItemStatLine(line.TextClass, line.Text))
+            .ToList();
+    }
+
     private static ItemSummary ReadSummary(SqliteDataReader reader) {
         string? Text(int i) => reader.IsDBNull(i) ? null : reader.GetString(i);
 
@@ -311,10 +461,27 @@ public sealed class CollectionService {
         }
 
         int NeedingStats() {
-            using var command = connection.CreateCommand();
-            command.CommandText = "SELECT COUNT(*) FROM PlayerItem WHERE Rarity IS NULL;";
-            try { return Convert.ToInt32(command.ExecuteScalar()); }
-            catch (SqliteException) { return 0; }   // column not added yet
+            try {
+                // A re-parse empties DatabaseItemStat_v2 — every id_databaseitem it referenced
+                // has just been reassigned — but leaves each item's Rarity in place. Counting
+                // rarities alone therefore reports "nothing to do" while every record-driven
+                // filter (slot, damage type, mastery, pet bonus) silently matches nothing. Ask
+                // the table that actually got cleared.
+                using var stats = connection.CreateCommand();
+                stats.CommandText =
+                    "SELECT (SELECT COUNT(*) FROM PlayerItem), " +
+                    "       (SELECT EXISTS (SELECT 1 FROM DatabaseItemStat_v2));";
+                using (var reader = stats.ExecuteReader()) {
+                    if (reader.Read() && reader.GetInt32(0) > 0 && reader.GetInt32(1) == 0) {
+                        return reader.GetInt32(0);
+                    }
+                }
+
+                using var command = connection.CreateCommand();
+                command.CommandText = "SELECT COUNT(*) FROM PlayerItem WHERE Rarity IS NULL;";
+                return Convert.ToInt32(command.ExecuteScalar());
+            }
+            catch (SqliteException) { return 0; }   // tables not created yet
         }
 
         return new HostStatus(

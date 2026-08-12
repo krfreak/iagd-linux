@@ -19,6 +19,7 @@ backup and buddy sharing are constructed in `MainWindow` and wired to its UI, so
 This is a port, not a superset: features upstream lacks do not get built here, however useful
 they might be, because nothing upstream-facing can then keep them honest.
 
+
 ---
 
 ## 1. Cloud backup and buddy sharing

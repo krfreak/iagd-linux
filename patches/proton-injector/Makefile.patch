@@ -1,0 +1,23 @@
+--- a/Makefile
++++ b/Makefile
+@@ -1,7 +1,18 @@
+ CC32 = i686-w64-mingw32-gcc
+ CC64 = x86_64-w64-mingw32-gcc
+-CFLAGS = -Wall -O2 -Iinclude -municode -fno-stack-protector
+-LDFLAGS = -municode -lkernel32 -luser32
++CFLAGS = -Wall -O2 -Iinclude -municode -fno-stack-protector -DIAGD_NO_CONSOLE
++# Linked as a GUI binary, with the console entry point kept.
++#
++# Wine gives a console-subsystem program a console, and when it is launched from a service
++# rather than a terminal that console is a *window* — which pops up over a fullscreen game
++# every time the attacher polls, and on a "minimise on focus loss" setup takes the game down
++# with it. Grim Dawn stops its game loop while minimised, so this was not cosmetic.
++#
++# Item Assistant on Windows avoids the same window with CreateNoWindow on the injector process
++# (InjectionHelper.InjectXBit). There is no equivalent to set from the Linux side, so the
++# binary itself must not ask for a console. Output still goes to --log-file, which is what
++# both the attach script and the host read.
++LDFLAGS = -municode -lkernel32 -luser32 -mwindows
+ 
+ SRC_DIR = src
+ BUILD_DIR = build

@@ -107,7 +107,12 @@ public class HookAttacher {
         // is right for a person watching a terminal and wrong here: this runs on a timer, so it
         // must come back and let the loop decide whether to try again.
         startInfo.Environment["ATTACH_TIMEOUT_MS"] = "8000";
-        startInfo.Environment["RETRY_MS"] = "2000";
+
+        // No retrying inside the injector: one attempt per call, and AutoAttachService decides
+        // when to try again. The injector's own loop turned a single attach into twenty
+        // LoadLibraryA remote threads fired into a game that was still starting up. Upstream
+        // injects at most once per pass for the same reason.
+        startInfo.Environment["RETRY_MS"] = "0";
 
         using var process = new Process { StartInfo = startInfo };
         var output = new System.Text.StringBuilder();
@@ -146,6 +151,12 @@ public class HookAttacher {
         if (text.Contains("ABORTED", StringComparison.Ordinal)) {
             return new AttachResult(AttachOutcome.NotReady,
                 "the game is still loading or in character select");
+        }
+
+        // No window yet. The game is running but has not drawn one, which is the normal state
+        // for the first stretch of a launch — not a failure, and not something to back off from.
+        if (text.Contains("NOT READY", StringComparison.Ordinal)) {
+            return new AttachResult(AttachOutcome.NotReady, "the game window has not appeared yet");
         }
 
         var lastLine = text.Split('\n', StringSplitOptions.RemoveEmptyEntries)

@@ -475,6 +475,13 @@ public sealed class ApiRouter {
             resistances = Groups(IAGrim.Core.ItemStats.FilterGroups.Resistances),
             misc = Groups(IAGrim.Core.ItemStats.FilterGroups.Misc),
             classes = _collection.Classes(),
+
+            // The two dropdowns above the list. Sent rather than hardcoded in the UI so there is
+            // one copy of them, and so verify-slot-filters.sh checks what the UI actually shows.
+            slots = IAGrim.Core.ItemStats.SlotFilters.Slots
+                .Select(s => (object)new { s.Tag, s.Label, s.ItemClasses, s.Inverse }).ToArray(),
+            rarities = IAGrim.Core.ItemStats.SlotFilters.Qualities
+                .Select(q => (object)new { q.Tag, q.Label, q.Rarity, q.PrefixRarity }).ToArray(),
         };
     }
 
@@ -531,6 +538,7 @@ public sealed class ApiRouter {
             MaximumLevel          = ParseInt(query["maxLevel"], 0),
             SocketedOnly          = ParseBool(query["socketed"]) ?? false,
             DuplicatesOnly        = ParseBool(query["duplicates"]) ?? false,
+            OrderByLevel          = ParseBool(query["orderByLevel"]) ?? false,
             RecentOnly            = ParseBool(query["recent"]) ?? false,
             // Repeatable, because one UI slot can mean several item classes ("two-handed").
             Slot                  = query.GetValues("slot") ?? [],

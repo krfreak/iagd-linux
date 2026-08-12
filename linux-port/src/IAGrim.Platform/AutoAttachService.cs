@@ -26,8 +26,17 @@ public sealed record AutoAttachState(bool Enabled, bool Attaching, int Attempts,
 /// returns FALSE) and refuses a second copy through a named mutex. See <see cref="HookAttacher"/>.
 /// </summary>
 public sealed class AutoAttachService {
-    /// <summary>After the game appears but is not yet hookable. Short: it is about to be.</summary>
-    private static readonly TimeSpan NotReadyDelay = TimeSpan.FromSeconds(10);
+    /// <summary>
+    /// After the game appears but is not yet hookable.
+    ///
+    /// This interval is what a player actually feels: the DLL refuses to attach at the main menu
+    /// and at character select, so the wait between attempts is the wait between loading a
+    /// character and the hook going live. Upstream retries roughly once a second — it can, since
+    /// its check is an in-process FindWindow and its injector is a one-second subprocess. Here
+    /// each attempt launches Proton, which costs seconds of CPU, so this sits between the two:
+    /// often enough not to be noticed, rarely enough not to be a tax on a machine running a game.
+    /// </summary>
+    private static readonly TimeSpan NotReadyDelay = TimeSpan.FromSeconds(8);
 
     /// <summary>First delay after a real failure, doubling up to <see cref="MaxFailureDelay"/>.</summary>
     private static readonly TimeSpan InitialFailureDelay = TimeSpan.FromSeconds(30);

@@ -138,8 +138,15 @@ public sealed class LootStore : IDisposable {
     /// <summary>
     /// Items with no tooltip yet — the ones that came from a file rather than from the hook.
     ///
+    /// **Equippable gear and relics only**, which is upstream's restriction in
+    /// <c>ListMissingReplica</c>: the class list is the same, and it exists because asking the
+    /// game to render a potion or a crafting material spends a round trip on something that has
+    /// no tooltip worth showing. A collection merged from elsewhere is mostly such items, so
+    /// without this most requests are wasted.
+    ///
     /// Ordered newest first so a freshly imported stash fills in while the player is looking at
-    /// it, rather than starting from items imported months ago.
+    /// it, rather than starting from items imported months ago. (Upstream orders randomly; that
+    /// spreads the work evenly but means the items on screen are the last to arrive.)
     /// </summary>
     public IReadOnlyList<ReplicaRequestItem> ItemsMissingReplica(int limit) {
         using var command = _connection.CreateCommand();
@@ -151,6 +158,21 @@ public sealed class LootStore : IDisposable {
                    IFNULL(RerollsUsed,0)
             FROM PlayerItem p
             WHERE NOT EXISTS (SELECT 1 FROM ReplicaItem2 r WHERE r.playeritemid = p.Id)
+              AND EXISTS (
+                    SELECT 1 FROM DatabaseItem_v2 db
+                     JOIN DatabaseItemStat_v2 dbs ON dbs.id_databaseitem = db.id_databaseitem
+                    WHERE db.baserecord = p.baserecord
+                      AND dbs.Stat = 'Class'
+                      AND dbs.TextValue IN (
+                        'ArmorProtective_Head', 'ArmorProtective_Hands', 'ArmorProtective_Feet',
+                        'ArmorProtective_Legs', 'ArmorProtective_Chest', 'ArmorProtective_Waist',
+                        'ArmorJewelry_Medal', 'ArmorJewelry_Ring', 'ArmorProtective_Shoulders',
+                        'ArmorJewelry_Amulet',
+                        'WeaponMelee_Dagger', 'WeaponMelee_Mace', 'WeaponMelee_Axe',
+                        'WeaponMelee_Scepter', 'WeaponMelee_Sword', 'WeaponMelee_Spear2h',
+                        'WeaponMelee_Sword2h', 'WeaponMelee_Mace2h', 'WeaponMelee_Axe2h',
+                        'WeaponHunting_Ranged1h', 'WeaponHunting_Ranged2h',
+                        'WeaponArmor_Offhand', 'WeaponArmor_Shield', 'ItemArtifact'))
             ORDER BY Id DESC
             LIMIT $limit;
             """;

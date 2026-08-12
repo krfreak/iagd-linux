@@ -138,7 +138,7 @@ public static class CollectionMerge {
                 var identity = Identity(reader);
                 if (!existing.Add(identity)) { duplicates++; continue; }
 
-                var item = ReadItem(reader);
+                var item = ReadItem(reader) with { KnownName = Blank(reader, 19) };
                 if (string.IsNullOrEmpty(item.BaseRecord)) { rejected++; continue; }
 
                 if (dryRun) { imported++; continue; }
@@ -189,6 +189,13 @@ public static class CollectionMerge {
             parts[i] = reader.IsDBNull(i) ? "" : reader.GetValue(i).ToString() ?? "";
         }
         return string.Join('', parts);
+    }
+
+    /// <summary>A text column, with empty read as absent.</summary>
+    private static string? Blank(SqliteDataReader reader, int index) {
+        if (reader.IsDBNull(index)) return null;
+        var text = reader.GetString(index);
+        return text.Length == 0 ? null : text;
     }
 
     private static LootedItem ReadItem(SqliteDataReader reader) {
