@@ -23,6 +23,23 @@ public sealed record SetEntry(string SetRecord, string Name, IReadOnlyList<SetMe
 public sealed record SetMember(string BaseRecord, string? Name, string? Icon, bool Owned);
 
 /// <summary>
+/// One component, and what it does.
+///
+/// <paramref name="Slots"/> is what the record says it may be socketed into, read from the flags
+/// the game sets on it (<c>chest</c>, <c>sword2h</c>, …) rather than from its FileDescription,
+/// which is developer text and says things like "All Armor (renamed to Antivenom Salve)".
+/// </summary>
+public sealed record ComponentEntry(
+    string BaseRecord,
+    string? Name,
+    string? Icon,
+    int LevelRequirement,
+    IReadOnlyList<string> Slots,
+    ItemSkillInfo? Skill,
+    IReadOnlyList<ItemStatLine> Stats,
+    int NumOwned);
+
+/// <summary>
 /// The "what am I missing" views, as distinct from item search: a checklist of every legendary
 /// and epic in the game against what the player owns.
 ///
@@ -35,8 +52,12 @@ public sealed record SetMember(string BaseRecord, string? Name, string? Icon, bo
 public sealed class CollectionViewService {
     private readonly string _databasePath;
 
+    /// <summary>Renders a component's stat lines; see <see cref="Components"/>.</summary>
+    private readonly IAGrim.Core.ItemStats.ItemStatText _statText;
+
     public CollectionViewService(string databasePath) {
         _databasePath = databasePath;
+        _statText = new IAGrim.Core.ItemStats.ItemStatText(databasePath);
 
         // A database this port has never opened — most importantly, one copied from a Windows
         // IAGD install — has upstream's tables but not the few this port adds. Creating them
@@ -219,5 +240,172 @@ public sealed class CollectionViewService {
             .Select(kv => new SetEntry(kv.Key, kv.Value.Name, kv.Value.Items))
             .OrderBy(s => s.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    /// <summary>
+    /// Every component in the game, with what it grants and where it can go.
+    ///
+    /// **Upstream has no such page.** Its "Components" nav entry opens
+    /// <c>grimdawn.evilsoft.net/enchantments/</c> in a browser — a site belonging to the same
+    /// author, which this port does not send anyone to for the reasons its nav carries no
+    /// Discord or Patreon link either. Everything the page needs is in Grim Dawn's own data,
+    /// which this client already reads, so it is built here instead of linked away.
+    ///
+    /// Components share <c>records/items/materia/</c> with the crafting materials. A component
+    /// is the one that says what it can be socketed into; a Scrap Metal says nothing, and is
+    /// left out.
+    /// </summary>
+    public IReadOnlyList<ComponentEntry> Components(string? nameFilter = null) {
+        using var connection = Open();
+
+        var slots = SlotFlags(connection);
+        var owned = OwnedCounts(connection);
+        var skills = new Dictionary<string, ItemSkillInfo>(StringComparer.OrdinalIgnoreCase);
+
+        using (var command = connection.CreateCommand()) {
+            command.CommandText = """
+                SELECT db.baserecord, s.Name, s.Description, IFNULL(s.Level, 0), s.Trigger,
+                       EXISTS (SELECT 1 FROM DatabaseItemStat_v2 st
+                                WHERE st.id_databaseitem = s.id_databaseitem
+                                  AND st.Stat = 'spawnObjects')
+                FROM DatabaseItem_v2 db
+                JOIN itemskill_mapping m ON m.id_databaseitem = db.id_databaseitem
+                JOIN itemskill_v2 s ON s.id_skill = m.id_skill
+                WHERE db.baserecord LIKE '%/materia/%';
+                """;
+            try {
+                using var reader = command.ExecuteReader();
+                while (reader.Read()) {
+                    skills[reader.GetString(0)] = new ItemSkillInfo(
+                        reader.IsDBNull(1) ? null : reader.GetString(1),
+                        reader.IsDBNull(2) ? null : reader.GetString(2),
+                        reader.GetInt64(3),
+                        reader.IsDBNull(4) ? null : reader.GetString(4),
+                        reader.GetInt64(5) != 0);
+                }
+            }
+            catch (SqliteException) { /* skills not parsed yet */ }
+        }
+
+        var components = new List<ComponentEntry>();
+        using (var command = connection.CreateCommand()) {
+            command.CommandText = """
+                SELECT Record, Name, IconFile, IFNULL(LevelRequirement, 0)
+                FROM ItemTemplate
+                WHERE Mod = '' AND Record LIKE '%/materia/%' AND Name IS NOT NULL
+                ORDER BY Name;
+                """;
+
+            try {
+                using var reader = command.ExecuteReader();
+                while (reader.Read()) {
+                    var record = reader.GetString(0);
+                    if (!slots.TryGetValue(record, out var fits) || fits.Count == 0) continue;
+
+                    components.Add(new ComponentEntry(
+                        BaseRecord:       record,
+                        Name:             reader.IsDBNull(1) ? null : reader.GetString(1),
+                        Icon:             reader.IsDBNull(2) ? null : reader.GetString(2),
+                        LevelRequirement: (int)reader.GetDouble(3),
+                        Slots:            fits,
+                        Skill:            skills.GetValueOrDefault(record),
+                        Stats:            [],
+                        NumOwned:         owned.GetValueOrDefault(record)));
+                }
+            }
+            catch (SqliteException) { return []; }
+        }
+
+        // The stat lines, through the same renderer an item's card uses.
+        var described = components
+            .Select(component => component with {
+                Stats = _statText.Available
+                    ? _statText.DescribeRecord(connection, component.BaseRecord)
+                        .Select(line => new ItemStatLine(
+                            line.TextClass, line.Text,
+                            line.Section?.ToString().ToLowerInvariant(),
+                            line.Modifier, line.Label, line.Skill, line.Extras))
+                        .ToList()
+                    : [],
+            })
+            .ToList();
+
+        if (string.IsNullOrWhiteSpace(nameFilter)) return described;
+
+        // Filtered here rather than in SQL, and on everything the card shows: the useful search
+        // on a components page is "which one gives lightning damage", and no component is
+        // *named* Lightning. A hundred rows make the cost of doing it in memory irrelevant.
+        var needle = nameFilter.Trim();
+        bool Matches(ComponentEntry component) =>
+            Contains(component.Name, needle)
+            || component.Slots.Any(slot => Contains(slot, needle))
+            || Contains(component.Skill?.Name, needle)
+            || Contains(component.Skill?.Description, needle)
+            || component.Stats.Any(stat => Contains(stat.Text, needle));
+
+        return described.Where(Matches).ToList();
+    }
+
+    private static bool Contains(string? haystack, string needle) =>
+        haystack is not null && haystack.Contains(needle, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// What each component may be socketed into, from the flags the record carries.
+    ///
+    /// The game marks a component with one flag per item type it fits — <c>chest</c>,
+    /// <c>sword2h</c>, <c>ranged1h</c>. Records under materia that carry none of them are the
+    /// crafting materials, and are how a component is told apart from a Scrap Metal.
+    /// </summary>
+    private static Dictionary<string, List<string>> SlotFlags(SqliteConnection connection) {
+        var result = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+
+        using var command = connection.CreateCommand();
+        command.CommandText = $"""
+            SELECT db.baserecord, dbs.stat
+            FROM DatabaseItem_v2 db
+            JOIN DatabaseItemStat_v2 dbs ON dbs.id_databaseitem = db.id_databaseitem
+            WHERE db.baserecord LIKE '%/materia/%'
+              AND dbs.stat IN ({string.Join(", ", ComponentSlots.Select(s => $"'{s}'"))})
+              AND dbs.val1 > 0;
+            """;
+        try {
+            using var reader = command.ExecuteReader();
+            while (reader.Read()) {
+                var record = reader.GetString(0);
+                if (!result.TryGetValue(record, out var list)) result[record] = list = [];
+                list.Add(reader.GetString(1));
+            }
+        }
+        catch (SqliteException) { return result; }
+
+        foreach (var list in result.Values) {
+            list.Sort(StringComparer.Ordinal);
+        }
+        return result;
+    }
+
+    /// <summary>The item types a component can be socketed into, as the game names them.</summary>
+    private static readonly string[] ComponentSlots = [
+        "head", "shoulders", "chest", "hands", "waist", "legs", "feet",
+        "amulet", "medal", "ring", "offhand", "shield",
+        "axe", "axe2h", "dagger", "mace", "mace2h", "scepter",
+        "sword", "sword2h", "spear2h", "ranged1h", "ranged2h",
+    ];
+
+    /// <summary>How many of each component the player has, loose or socketed into something.</summary>
+    private static Dictionary<string, int> OwnedCounts(SqliteConnection connection) {
+        var result = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT MateriaRecord, COUNT(*) FROM PlayerItem
+            WHERE MateriaRecord IS NOT NULL AND MateriaRecord != ''
+            GROUP BY MateriaRecord;
+            """;
+        try {
+            using var reader = command.ExecuteReader();
+            while (reader.Read()) result[reader.GetString(0)] = reader.GetInt32(1);
+        }
+        catch (SqliteException) { /* fine */ }
+        return result;
     }
 }

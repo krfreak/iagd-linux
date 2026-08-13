@@ -148,6 +148,72 @@ public sealed class ItemStatText {
     }
 
     /// <summary>
+    /// Lines for a *record* rather than an owned item — a component, which nobody owns a rolled
+    /// copy of and which has nothing to roll.
+    ///
+    /// The same three passes and the same filter as <see cref="Describe"/>; what it skips is the
+    /// seed engine, since a component's numbers are fixed. Everything after that is shared, so a
+    /// component's text is produced by the code that produces an item's.
+    /// </summary>
+    public IReadOnlyList<StatText> DescribeRecord(SqliteConnection connection, string record) {
+        var manager = _stats.Value;
+        if (manager is null) return [];
+
+        var rows = LoadRecordRows(connection, record);
+        if (rows.Count == 0) return [];
+
+        // Upstream's Filter: one row per stat, the highest value winning.
+        var stats = rows.GroupBy(r => r.Stat)
+                        .Select(g => g.OrderByDescending(r => r.Value).First())
+                        .Cast<IItemStat>()
+                        .ToHashSet();
+
+        var lines = new List<StatText>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        Append(lines, seen, manager.ProcessStats(stats, TranslatedStatType.HEADER), StatSection.Header);
+        Append(lines, seen, manager.ProcessStats(stats, TranslatedStatType.BODY), StatSection.Body);
+
+        var pet = manager.ProcessStats(stats, TranslatedStatType.PET);
+        if (pet.Count > 0) {
+            var petLines = new List<StatText>();
+            Append(petLines, seen, pet, StatSection.Pet);
+            if (petLines.Count > 0) {
+                lines.Add(new StatText(PetHeadingClass, "Bonus to All Pets", StatSection.Pet));
+                lines.AddRange(petLines);
+            }
+        }
+
+        return lines;
+    }
+
+    private static List<DBStatRow> LoadRecordRows(SqliteConnection connection, string record) {
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT dbs.Stat, dbs.TextValue, dbs.val1
+            FROM DatabaseItem_v2 db
+            JOIN DatabaseItemStat_v2 dbs ON dbs.id_databaseitem = db.id_databaseitem
+            WHERE db.baserecord = $record;
+            """;
+        command.Parameters.AddWithValue("$record", record);
+
+        var rows = new List<DBStatRow>();
+        try {
+            using var reader = command.ExecuteReader();
+            while (reader.Read()) {
+                rows.Add(new DBStatRow {
+                    Record    = record,
+                    Stat      = reader.IsDBNull(0) ? null : reader.GetString(0),
+                    TextValue = reader.IsDBNull(1) ? null : reader.GetString(1),
+                    Value     = reader.IsDBNull(2) ? 0 : reader.GetDouble(2),
+                });
+            }
+        }
+        catch (SqliteException) { /* not analysed yet */ }
+        return rows;
+    }
+
+    /// <summary>
     /// Upstream's <c>ItemStat.tsx</c>, in C#: a computed line is drawn as a leading value and the
     /// rest, each in its own colour, with a modified skill's name split off again.
     ///

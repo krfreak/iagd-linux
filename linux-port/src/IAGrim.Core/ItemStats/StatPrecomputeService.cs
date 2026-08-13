@@ -58,6 +58,12 @@ public sealed class StatPrecomputeService {
             foreach (var record in item.Records()) wanted.Add(record);
         }
         foreach (var record in SkillRecords(connection)) wanted.Add(record);
+
+        // Every component in the game, not just the ones this collection happens to have
+        // socketed. The Components view describes all of them, and a component nobody owns has
+        // no other reason to be here — 108 records, so the cost is nothing.
+        foreach (var record in ComponentRecords(connection)) wanted.Add(record);
+
         progress?.Invoke($"{items.Count:N0} items referencing {wanted.Count:N0} records");
 
         // Pass 1: which records are pet-bonus targets, and which record points at which.
@@ -178,7 +184,7 @@ public sealed class StatPrecomputeService {
     ///
     /// Raise this whenever the rows written here change shape or content.
     /// </summary>
-    public const int Version = 2;
+    public const int Version = 3;
 
     /// <summary>Where that number is kept. Read by StatRefresh to decide on a rebuild.</summary>
     public const string VersionKey = "stats.version";
@@ -193,6 +199,26 @@ public sealed class StatPrecomputeService {
         command.Parameters.AddWithValue("$value", Version.ToString());
         try { command.ExecuteNonQuery(); }
         catch (SqliteException) { /* pre-GameDataMeta database; the next start creates it */ }
+    }
+
+    /// <summary>
+    /// Every component record the parse found, so the Components view can describe all of them.
+    ///
+    /// Components live under <c>records/items/materia/</c>, which is also where the crafting
+    /// materials are; both are read, and the view decides which is which by whether the record
+    /// says what it can be socketed into.
+    /// </summary>
+    private static List<string> ComponentRecords(SqliteConnection connection) {
+        using var command = connection.CreateCommand();
+        command.CommandText =
+            "SELECT DISTINCT Record FROM ItemTemplate WHERE Record LIKE '%/materia/%';";
+        var records = new List<string>();
+        try {
+            using var reader = command.ExecuteReader();
+            while (reader.Read()) records.Add(reader.GetString(0));
+        }
+        catch (SqliteException) { /* not parsed yet */ }
+        return records;
     }
 
     /// <summary>Records of skills items grant, so the summoner filter has stat rows to test.</summary>

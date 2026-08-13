@@ -1051,6 +1051,40 @@ parse: Reading Grim Dawn's data…      ← visible in the status bar
 stats: …                              ← and the analysis that has to follow
 ```
 
+### The components page, which upstream does not have
+
+Upstream's "Components" nav entry is not a page. It is
+`openUrl("https://grimdawn.evilsoft.net/enchantments/")` with an external-link icon — its
+author's website. There is nothing in the submodule to port, so this port had copied the link.
+
+Everything such a page needs is in Grim Dawn's own data, which this client already reads, so it
+is built here rather than linked away — for the same reason the nav carries no Discord or
+Patreon link. Nothing on the page leaves the machine.
+
+Two things had to be sorted out to build it:
+
+**Which records are components.** They share `records/items/materia/` with the crafting
+materials. A component is the one that says what it can be socketed into: the game marks it with
+one flag per item type (`chest`, `sword2h`, `ranged1h`). Of 108 records under materia, 107 carry
+those flags and one — Aether Crystal — does not, which is exactly the distinction wanted. The
+alternative source, `FileDescription`, is developer text: it says things like
+*"All Armor (renamed to Antivenom Salve)"* and is present on only a quarter of them.
+
+**Where the stat rows come from.** `DatabaseItem_v2` holds the records a *collection* references,
+so only the 28 components this player had socketed had any stats at all. The analysis pass now
+adds every component record to the set it reads, the way it already does for skill records —
+108 records, so the cost is nothing — and `StatPrecomputeService.Version` goes to 3 so existing
+collections pick it up by themselves.
+
+The stat lines then go through `ItemStatText.DescribeRecord`, which is `Describe` without the
+seed engine: a component's numbers are fixed, and everything after that is shared, so a
+component reads exactly the way an item does.
+
+Search covers the name, the stats, the granted skill and the slots, because the useful question
+on a components page is "which one gives lightning damage" and no component is *named*
+Lightning. Filtered in memory rather than SQL: a hundred rows make the cost irrelevant, and the
+stat lines only exist after rendering.
+
 ### The help page
 
 Upstream keeps its help as a 500-line TSX file: thirty entries, each a title, a tag, a

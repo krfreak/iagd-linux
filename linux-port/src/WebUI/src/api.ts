@@ -335,6 +335,25 @@ export interface SetEntry {
   totalCount: number;
 }
 
+/**
+ * One component, and what it does.
+ *
+ * Upstream has no components page: its nav entry opens the author's website. This one is built
+ * from Grim Dawn's own data, which the client already reads.
+ */
+export interface ComponentEntry {
+  baseRecord: string;
+  name: string | null;
+  icon: string | null;
+  levelRequirement: number;
+  /** What the record says it can be socketed into: 'chest', 'sword2h', … */
+  slots: string[];
+  skill: ItemSkillInfo | null;
+  stats: ItemStatLine[];
+  /** How many the player has socketed into something. */
+  numOwned: number;
+}
+
 export interface Settings {
   stashToLootFrom: number;
   stashToDepositTo: number;
@@ -446,6 +465,12 @@ export const api = {
     const params = new URLSearchParams();
     if (query?.trim()) params.set('q', query.trim());
     return fetch(`/api/sets?${params}`).then(json<SetEntry[]>);
+  },
+
+  components: (query?: string) => {
+    const params = new URLSearchParams();
+    if (query?.trim()) params.set('q', query.trim());
+    return fetch(`/api/components?${params}`).then(json<ComponentEntry[]>);
   },
 
   item: (id: number) => fetch(`/api/items/${id}`).then(json<ItemDetail>),

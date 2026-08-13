@@ -88,6 +88,12 @@ public sealed class ApiRouter {
                 await Json_(context, _views.Sets(query["q"]));
                 return;
 
+            // Upstream's Components tab opens its author's website; this one is built from the
+            // game's own data. See CollectionViewService.Components.
+            case ("GET", "/api/components"):
+                await Json_(context, _views.Components(query["q"]));
+                return;
+
             case ("GET", "/api/mods"):
                 await Json_(context, _collection.Mods());
                 return;

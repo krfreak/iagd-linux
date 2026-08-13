@@ -8,6 +8,7 @@ import {
 } from './api';
 import { GrimText, StatLine, stripGrimText } from './GrimText';
 import { Help } from './Help';
+import { Components } from './Components';
 import './style.css';
 
 const PAGE_SIZE = 60;
@@ -22,7 +23,7 @@ const PAGE_SIZE = 60;
 type Tab = 'items' | 'online' | 'settings' | 'grimdawn';
 
 /** The tabs inside the item view, which upstream draws in the web page itself. */
-type View = 'items' | 'collections' | 'sets' | 'help';
+type View = 'items' | 'collections' | 'sets' | 'components' | 'help';
 
 function StatusBar({ status }: { status: HostStatus | null }) {
   if (!status) return <div class="status status--warn">Connecting to iagd-host…</div>;
@@ -1381,6 +1382,7 @@ function App() {
                       ['items', 'Items'],
                       ['collections', 'Collections'],
                       ['sets', 'Sets'],
+                      ['components', 'Components'],
                       ['help', 'Help'],
                     ] as [View, string][]).map(([value, label]) => (
                       <a
@@ -1391,15 +1393,14 @@ function App() {
                         {label}
                       </a>
                     ))}
-                    {/* Upstream's nav also carries Discord and Patreon links. This port does not
-                        reproduce them and should not: it is an unaffiliated port, and those are
-                        somebody else's community and somebody else's funding. Sending this
-                        project's users there would imply a connection that does not exist and
-                        put support requests for this code in front of people who did not write
-                        it. Do not add them back. */}
-                    <a onClick={() => window.open('https://grimdawn.evilsoft.net/enchantments/', '_blank')}>
-                      Components
-                    </a>
+                    {/* Upstream's nav also carries Discord and Patreon links, and opens its
+                        Components entry on its author's website. This port reproduces none of
+                        the three and should not: it is an unaffiliated port, and those are
+                        somebody else's community, funding and site. Sending this project's
+                        users there would imply a connection that does not exist and put
+                        support requests for this code in front of people who did not write it.
+                        Components is a page here instead — the data is Grim Dawn's, and this
+                        client already reads it. Do not add the links back. */}
                   </nav>
 
                   {view === 'items' && (
@@ -1421,6 +1422,8 @@ function App() {
                 <main class="webview__body">
                   {view === 'collections' && <CollectionView filters={search} />}
                   {view === 'sets' && <SetsView query={query} />}
+                  {view === 'components' && <Components />}
+
                   {view === 'help' && <Help />}
 
                   {view === 'items' && (
