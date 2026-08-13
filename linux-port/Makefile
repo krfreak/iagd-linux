@@ -12,12 +12,18 @@ APP    := src/IAGrim.App/IAGrim.App.csproj
 HOST   := src/IAGrim.Host/IAGrim.Host.csproj
 CLI    := tools/iagd/iagd.csproj
 
-.PHONY: all ui help icon app cli run host verify package clean
+.PHONY: all ui help favicon icon app cli run host verify package clean
 
 all: ui app cli
 
-ui: $(WEBUI)/node_modules help
+ui: $(WEBUI)/node_modules help favicon
 	cd $(WEBUI) && npm run build
+
+## The browser tab's icon, from the same source as the application's. Running the host and
+## opening a browser is a supported way to use this, so that tab should not be blank.
+favicon: $(WEBUI)/public/favicon.png
+$(WEBUI)/public/favicon.png: packaging/make-icon.sh
+	@./packaging/make-icon.sh $@ 64
 
 ## The help page, read out of upstream's pinned submodule rather than copied into this
 ## repository — the same rule the hook and the injector follow. See scripts/extract-help.py.

@@ -1069,6 +1069,26 @@ parse: Reading Grim Dawn's data…      ← visible in the status bar
 stats: …                              ← and the analysis that has to follow
 ```
 
+### The application icon
+
+This port drew its own — a stash chest — which meant a dock entry that looked like something
+unrelated that happens to open the same collection. Upstream's is `IAGrim/gd.ico`, its
+`<ApplicationIcon>`, and it carries 16, 32, 64, 128 and 256 px renditions.
+
+`packaging/make-icon.sh` now extracts those instead, at build time, from the pinned submodule —
+generated and gitignored, the rule the hook, the injector and the help page all follow. Each size
+comes from the `.ico`'s own rendition rather than from resampling the largest, because the small
+ones were drawn for those pixel counts; only 48 px, which the file does not carry, is resampled,
+and the script says so. Without the submodule it draws the chest and warns, so a bare checkout
+still builds.
+
+The browser tab gets the same picture at 64 px: running the host and opening a browser is a
+supported way to use this client, so that tab should not be blank.
+
+The four panel sizes had been **committed** by the initial commit — harmlessly, since they were
+this port's own drawing, but the same paths now hold upstream's artwork. They are untracked and
+ignored, which is where they should have been all along.
+
 ### The Support page, and the one place outbound links are allowed
 
 This project points at nothing of upstream's — not its Discord, not its Patreon, not its site —

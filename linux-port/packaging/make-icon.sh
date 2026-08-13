@@ -1,16 +1,77 @@
 #!/usr/bin/env bash
-# Draws the application icon.
+# Produces the application icon.
 #
-# Generated rather than committed as a binary: it is a handful of shapes, and a script can be
-# read and changed in a way a checked-in PNG cannot. Grim Dawn's palette — parchment and gold on
-# near-black — so it does not look foreign next to the game.
+# Upstream's, when the submodule holding it is checked out: IAGrim/gd.ico is its
+# <ApplicationIcon>, and it carries 16, 32, 64, 128 and 256 px renditions. This is the same tool,
+# so it should look like it in a dock and an app menu rather than like something unrelated that
+# happens to open the same collection.
 #
-# The shape is a stash chest: this manages a stash, and a chest reads at 16 px where anything
-# more detailed does not.
+# Extracted at build time, never committed — the rule the hook, the injector and the help page
+# all follow. The output path is gitignored.
+#
+# Without the submodule it draws a stash chest instead, so a bare checkout still builds. That is
+# the fallback rather than the intent: a handful of shapes in Grim Dawn's palette, in a script
+# that can be read and changed in a way a checked-in binary cannot.
 
 set -euo pipefail
 OUT="${1:?usage: make-icon.sh <output.png>}"
 SIZE="${2:-256}"
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+UPSTREAM_ICON="$ROOT/iagd/IAGrim/gd.ico"
+
+# --- upstream's icon, at each size it actually ships -------------------------------------
+#
+# Taken from the .ico's own renditions rather than downscaling one of them: the small sizes in
+# an .ico are drawn for those pixel counts, and a 256->32 resample throws that away.
+if [ -f "$UPSTREAM_ICON" ] && command -v python3 >/dev/null 2>&1 \
+   && python3 -c "import PIL" >/dev/null 2>&1; then
+    mkdir -p "$(dirname "$OUT")"
+    python3 - "$UPSTREAM_ICON" "$OUT" "$SIZE" <<'EXTRACT'
+import sys
+from PIL import Image
+
+source, out, size = sys.argv[1], sys.argv[2], int(sys.argv[3])
+icon = Image.open(source)
+available = sorted(icon.info.get("sizes", []))
+
+
+def render(target, path):
+    """The .ico's own rendition at this size, or the nearest one above it resampled down."""
+    exact = (target, target) in available
+    icon.size = (target, target) if exact else max(available)
+    image = icon.convert("RGBA")
+    if not exact:
+        image = image.resize((target, target), Image.LANCZOS)
+    image.save(path)
+    return exact
+
+
+render(size, out)
+print(f"  icon: {out} ({size}x{size}, from upstream's gd.ico)")
+
+# Panel sizes alongside the main one: desktop icon themes expect them present, and a toolkit
+# downscaling 256 px to 22 px is worse than the rendition the author drew.
+if size == 256:
+    from pathlib import Path
+    stem = Path(out)
+    drawn = []
+    for small in (32, 48, 64, 128):
+        exact = render(small, stem.with_name(f"{stem.stem}-{small}.png"))
+        drawn.append(f"{small}{'' if exact else '*'}")
+    print(f"  also: {', '.join(drawn)} px  (* resampled, not in the .ico)")
+EXTRACT
+    exit 0
+fi
+
+if [ -f "$UPSTREAM_ICON" ]; then
+    echo "  icon: upstream's gd.ico found but python3/Pillow is not available; drawing instead" >&2
+else
+    echo "  icon: upstream's gd.ico not found; drawing instead" >&2
+    echo "        run: git submodule update --init --recursive" >&2
+fi
+
+# --- the fallback ------------------------------------------------------------------------
 
 SVG="$(mktemp --suffix=.svg)"
 trap 'rm -f "$SVG"' EXIT
