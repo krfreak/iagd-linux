@@ -24,6 +24,14 @@ if (args.Length == 2 && args[0] == "--prepare") {
     return;
 }
 
+// "--describe <db>" renders every item's tooltip the way the client does and reports how the
+// lines came out. Colours are not stored anywhere — a line is built per request from the game's
+// stat rows — so this is the only way to check that a collection renders correctly: render it.
+if (args.Length == 2 && args[0] == "--describe") {
+    Describe(args[1]);
+    return;
+}
+
 var assembly = typeof(IAGrim.Host.ItemQuery).Assembly;
 
 var builder = assembly.GetType("IAGrim.Host.ItemQueryBuilder")
@@ -60,6 +68,72 @@ while ((line = Console.ReadLine()) != null) {
     }
 
     Console.WriteLine($"{name}\t{$"SELECT p.Id {from} WHERE {where} ORDER BY p.Id".ReplaceLineEndings(" ")}");
+}
+
+static void Describe(string databasePath) {
+    using var connection = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={databasePath};Mode=ReadOnly");
+    connection.Open();
+
+    var ids = new List<long>();
+    using (var command = connection.CreateCommand()) {
+        command.CommandText = "SELECT Id FROM PlayerItem ORDER BY Id;";
+        using var reader = command.ExecuteReader();
+        while (reader.Read()) ids.Add(reader.GetInt64(0));
+    }
+
+    var text = new IAGrim.Core.ItemStats.ItemStatText(databasePath);
+    if (!text.Available) {
+        Console.WriteLine("unavailable\tthe game's data has not been parsed");
+        return;
+    }
+
+    // Items whose tooltip the game itself drew: those are coloured by row type instead, and
+    // are counted rather than split.
+    var captured = new HashSet<long>();
+    using (var command = connection.CreateCommand()) {
+        command.CommandText = "SELECT DISTINCT playeritemid FROM ReplicaItem2 WHERE playeritemid IS NOT NULL;";
+        using var reader = command.ExecuteReader();
+        while (reader.Read()) captured.Add(reader.GetInt64(0));
+    }
+
+    long described = 0, undescribed = 0, lines = 0, split = 0, unsplit = 0, headings = 0,
+         skills = 0, extras = 0;
+    var sections = new SortedDictionary<string, long>(StringComparer.Ordinal);
+
+    foreach (var id in ids) {
+        if (captured.Contains(id)) continue;
+
+        var rows = text.Describe(connection, id);
+        if (rows.Count == 0) { undescribed++; continue; }
+        described++;
+
+        foreach (var row in rows) {
+            lines++;
+            var section = row.Section?.ToString().ToLowerInvariant() ?? "none";
+            sections[section] = sections.TryGetValue(section, out var n) ? n + 1 : 1;
+
+            // "Bonus to All Pets" is a heading rather than a stat: upstream draws it from its
+            // own markup, and it is meant to carry a row type instead of being split.
+            if (row.TextClass >= 0) headings++;
+            // A stat with neither half has nothing to colour: it would be drawn in the
+            // container's default, which is what the whole collection looked like before.
+            else if (row.Modifier is null && row.Label is null) unsplit++;
+            else split++;
+            if (row.Skill is not null) skills++;
+            if (row.Extras is not null) extras++;
+        }
+    }
+
+    Console.WriteLine($"captured\t{captured.Count}");
+    Console.WriteLine($"described\t{described}");
+    Console.WriteLine($"undescribed\t{undescribed}");
+    Console.WriteLine($"lines\t{lines}");
+    Console.WriteLine($"split\t{split}");
+    Console.WriteLine($"unsplit\t{unsplit}");
+    Console.WriteLine($"headings\t{headings}");
+    Console.WriteLine($"skills\t{skills}");
+    Console.WriteLine($"extras\t{extras}");
+    foreach (var (section, count) in sections) Console.WriteLine($"section.{section}\t{count}");
 }
 
 static string Literal(object value) => value switch {

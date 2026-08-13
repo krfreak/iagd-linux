@@ -23,9 +23,25 @@ export interface ItemSummary {
   stackCount: number;
 }
 
+/**
+ * One tooltip line, in whichever of upstream's two shapes it has.
+ *
+ * A line Grim Dawn drew carries the row type the game gave it, and upstream colours it from that
+ * type alone (ReplicaStat.css). A computed line has no such type: upstream renders those through
+ * ItemStat.tsx, splitting each into a leading value and the rest, coloured differently per list.
+ */
 export interface ItemStatLine {
   textClass: number;
   text: string;
+  /** 'header', 'body' or 'pet' on a computed line; null on a captured one. */
+  section: string | null;
+  /** The leading value, e.g. "+162%". Null on a captured line. */
+  modifier: string | null;
+  label: string | null;
+  /** A skill the line modifies, drawn apart from the label in its own colour. */
+  skill: string | null;
+  /** That skill's tooltip, e.g. "Tier 3 Occultist". */
+  extras: string | null;
 }
 
 /** A skill the item grants. Null when it grants none. */

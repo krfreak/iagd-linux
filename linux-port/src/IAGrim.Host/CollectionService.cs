@@ -356,7 +356,10 @@ public sealed class CollectionService {
     private IReadOnlyList<ItemStatLine> Computed(SqliteConnection connection, long id) {
         if (!_statText.Available) return [];
         return _statText.Describe(connection, id)
-            .Select(line => new ItemStatLine(line.TextClass, line.Text))
+            .Select(line => new ItemStatLine(
+                line.TextClass, line.Text,
+                line.Section?.ToString().ToLowerInvariant(),
+                line.Modifier, line.Label, line.Skill, line.Extras))
             .ToList();
     }
 

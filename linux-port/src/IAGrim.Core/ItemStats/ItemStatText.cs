@@ -5,8 +5,27 @@ using StatTranslator;
 
 namespace IAGrim.Core.ItemStats;
 
-/// <summary>One rendered tooltip line, tagged with the replica row type it stands in for.</summary>
-public sealed record StatText(int TextClass, string Text);
+/// <summary>Which of upstream's three lists a computed line belongs to; null for a captured row.</summary>
+public enum StatSection { Header, Body, Pet }
+
+/// <summary>
+/// One tooltip line.
+///
+/// A *captured* line carries the row type Grim Dawn gave it, and upstream colours it from that
+/// type alone (ReplicaStat.css). A *computed* line has no such type: upstream renders it through
+/// a different component (ItemStat.tsx) which splits it in two — the leading number is the
+/// "modifier" and the rest is the "label" — and colours the halves differently, per list.
+///
+/// Both shapes are carried here because a card is one or the other, never a mix, and squeezing
+/// a computed line into a borrowed row type is what made every one of them a single flat colour.
+/// </summary>
+/// <param name="Modifier">The leading value, e.g. "+162%". Null on a captured line.</param>
+/// <param name="Label">What the value applies to, e.g. "Vitality Damage".</param>
+/// <param name="Skill">A skill the line modifies, drawn apart from the label and in its own colour.</param>
+/// <param name="Extras">What upstream shows as that skill's tooltip, e.g. "Tier 3 Occultist".</param>
+public sealed record StatText(int TextClass, string Text, StatSection? Section = null,
+                              string? Modifier = null, string? Label = null,
+                              string? Skill = null, string? Extras = null);
 
 /// <summary>
 /// The tooltip lines for an item, computed rather than captured.
@@ -90,15 +109,15 @@ public sealed class ItemStatText {
         // "+198% Aether Damage" on a real item before this.
         var seen = new HashSet<string>(StringComparer.Ordinal);
 
-        Append(lines, seen, manager.ProcessStats(stats, TranslatedStatType.HEADER), HeaderClass);
-        Append(lines, seen, manager.ProcessStats(stats, TranslatedStatType.BODY), BodyClass);
+        Append(lines, seen, manager.ProcessStats(stats, TranslatedStatType.HEADER), StatSection.Header);
+        Append(lines, seen, manager.ProcessStats(stats, TranslatedStatType.BODY), StatSection.Body);
 
         var pet = manager.ProcessStats(stats, TranslatedStatType.PET);
         if (pet.Count > 0) {
             var petLines = new List<StatText>();
-            Append(petLines, seen, pet, PetClass);
+            Append(petLines, seen, pet, StatSection.Pet);
             if (petLines.Count > 0) {
-                lines.Add(new StatText(PetHeadingClass, "Bonus to All Pets"));
+                lines.Add(new StatText(PetHeadingClass, "Bonus to All Pets", StatSection.Pet));
                 lines.AddRange(petLines);
             }
         }
@@ -107,22 +126,66 @@ public sealed class ItemStatText {
     }
 
     /// <summary>
-    /// Replica row types to borrow, so a computed line is styled exactly like a captured one:
-    /// 17 is the header block, 18 a regular stat, 68 the pet heading and 69 a pet line.
+    /// Replica row types to borrow for the lines that are headings rather than stats: 68 is
+    /// upstream's "Bonus to All Pets", which it draws from its own markup rather than a stat.
     /// </summary>
-    private const int HeaderClass = 17;
-    private const int BodyClass = 18;
     private const int PetHeadingClass = 68;
-    private const int PetClass = 69;
+
+    /// <summary>
+    /// A computed line has no row type, and saying so is load-bearing: the game uses 0 for the
+    /// blank line between blocks, which the client draws as a break rather than as text.
+    /// </summary>
+    private const int NoRowType = -1;
 
     private static void Append(List<StatText> lines, HashSet<string> seen,
-                               IEnumerable<TranslatedStat> stats, int textClass) {
+                               IEnumerable<TranslatedStat> stats, StatSection section) {
         foreach (var stat in stats) {
             var text = stat.ToString()?.Trim();
             if (string.IsNullOrWhiteSpace(text)) continue;
             if (!seen.Add(text)) continue;
-            lines.Add(new StatText(textClass, text));
+            lines.Add(Split(stat, text, section));
         }
+    }
+
+    /// <summary>
+    /// Upstream's <c>ItemStat.tsx</c>, in C#: a computed line is drawn as a leading value and the
+    /// rest, each in its own colour, with a modified skill's name split off again.
+    ///
+    /// The split is on the first space, which reads as a hack and is upstream's rule exactly —
+    /// "+162% Vitality Damage" becomes "+162%" and "Vitality Damage". A line with no space at all
+    /// keeps its whole text as the label, since a value with nothing to apply to is meaningless.
+    ///
+    /// Done here rather than in the client because the pieces have to agree with
+    /// <see cref="TranslatedStat.ToString"/>, which is upstream's and rounds percentages; a second
+    /// implementation in TypeScript would be a second set of rounding rules to keep in step.
+    /// </summary>
+    private static StatText Split(TranslatedStat stat, string text, StatSection section) {
+        // Upstream replaces the skill placeholder with a space *before* splitting, so the skill
+        // name never lands in the label — it is drawn separately, in the skill colour.
+        string? skill = null;
+        var splittable = text;
+
+        if (stat.Extra is not null && stat.Text?.Contains("{3}") == true) {
+            skill = stat.Param3;
+            splittable = Render(stat, stat.Text.Replace("{3}", " "));
+        }
+
+        var space = splittable.IndexOf(' ');
+        var modifier = space > 0 ? splittable[..space] : null;
+        var label = space > 0 ? splittable[(space + 1)..].Trim() : splittable.Trim();
+
+        return new StatText(NoRowType, text, section, modifier, label, skill, stat.Extra?.ToString());
+    }
+
+    /// <summary>Fills in a stat's parameters for a template other than its own.</summary>
+    private static string Render(TranslatedStat stat, string template) {
+        var copy = new TranslatedStat {
+            Text = template,
+            Param0 = stat.Param0, Param1 = stat.Param1, Param2 = stat.Param2,
+            Param3 = "", Param4 = stat.Param4, Param5 = stat.Param5, Param6 = stat.Param6,
+            Type = stat.Type,
+        };
+        return copy.ToString()?.Trim() ?? template;
     }
 
     /// <summary>

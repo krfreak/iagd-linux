@@ -25,7 +25,21 @@ public sealed record ItemSummary(
     /// <summary>How many are in the stack; 1 for anything that does not stack.</summary>
     long StackCount);
 
-public sealed record ItemStatLine(int TextClass, string Text);
+/// <summary>
+/// One tooltip line, in whichever of upstream's two shapes it has.
+///
+/// A line Grim Dawn drew carries the row type it gave it, and upstream colours it from that type
+/// alone (ReplicaStat.css). A line this port computed has no such type: upstream renders those
+/// through ItemStat.tsx, which splits each into a leading value and the rest and colours the
+/// halves differently depending on which of its three lists the line is in.
+/// </summary>
+/// <param name="Section">"header", "body" or "pet" for a computed line; null for a captured one.</param>
+/// <param name="Modifier">The leading value, e.g. "+162%". Null on a captured line.</param>
+/// <param name="Skill">A skill the line modifies, drawn apart from the label in its own colour.</param>
+/// <param name="Extras">That skill's tooltip, e.g. "Tier 3 Occultist".</param>
+public sealed record ItemStatLine(int TextClass, string Text, string? Section = null,
+                                  string? Modifier = null, string? Label = null,
+                                  string? Skill = null, string? Extras = null);
 
 /// <summary>
 /// A skill an item grants. Upstream shows this on the item and offers a "Hide Skills" toggle to

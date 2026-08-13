@@ -974,6 +974,58 @@ every other measure (names, rarities, colours, icons) and the filter matched not
 `StatPrecomputeService.Version` is stamped into `GameDataMeta` after each pass, and `StatRefresh`
 asks for a rebuild when what is stored is older. Raise it whenever the rows written there change.
 
+### Colouring a tooltip line
+
+Upstream has **two** renderers for item text and picks between them by where the line came from.
+This port had only one, so every line it computed came out a single flat colour.
+
+| Line | Renderer | Coloured by |
+| --- | --- | --- |
+| Grim Dawn drew it | `ReplicaStat.tsx` | the row type the game assigned — 34 is the "Granted Skills" heading, 19 the level requirement, 27 a component name |
+| Computed from the game database | `ItemStat.tsx` | a split: the leading value, then the rest, then a modified skill's name — three colours, chosen by which list the line is in |
+
+The split is on the first space and that is upstream's rule exactly: `"+162% Vitality Damage"`
+becomes `"+162%"` and `"Vitality Damage"`. The halves get `--item-stat-modifier` (#dbb284) and
+`--item-stat-label` (#a88054) in the body and pet lists, and `--item-header-info` (#eeeeeec4) in
+the header list. A stat that modifies a skill is split once more: upstream replaces the skill
+placeholder with a space *before* splitting, so the name never lands in the label and is drawn in
+`--item-skill` (#338cce) with its tier on a tooltip — "+2 to **Sigil of Consumption**", hovering
+for "Tier 3 Occultist skill".
+
+Done in C# rather than in the client, because the pieces have to agree with upstream's
+`TranslatedStat.ToString`, which rounds percentages; a second implementation in TypeScript would
+be a second set of rounding rules to keep in step.
+
+This matters far more here than it does upstream: only items looted with the hook attached carry
+a captured tooltip. In this collection that is **5 items out of 7,483** — every other card is
+computed, so "the computed renderer has no colours" meant "the client has no colours".
+
+`scripts/verify-stat-rendering.sh` renders every item through the client's own code and reports
+how the lines came out. There is nothing stored to check — a computed line is built per request —
+so rendering the collection is the only way to know it renders correctly.
+
+### Captured lines are coloured by a table that predates the current game
+
+The row types in a captured tooltip come from Grim Dawn itself (`GameTextLine::textClass`, which
+the hook copies verbatim), and upstream's colour table was written against an older version of
+the game. On the current one they no longer line up:
+
+| Row | Type today | Upstream's table says |
+| --- | --- | --- |
+| Flavour text | 17 | 16 is the description; 17 is weapon damage |
+| Slot and quality | 66 | 64 is slot and quality; 66 is total armour |
+| Weapon damage | 18 | 18 is a regular stat |
+| Regular stats | 19 | 19 is the level requirement, drawn grey |
+| Level requirement | 20 | 20 is a set name, drawn teal |
+
+So a captured item shows its stats in the disabled grey and its level requirement in the set
+colour. **This port renders it identically, on purpose**: the types come from the same hook and
+the table is upstream's, so the two tools agree — and agreeing is the point. Correcting the table
+would mean the Windows tool and this one disagree about the same item.
+
+Worth revisiting if upstream updates the table, and worth knowing if the colours ever look wrong
+on a looted item: it is not this port's rendering that is off.
+
 ### Two totals, and which one to show
 
 Identical items share a card, so a search has two sizes: the number of cards, which is what

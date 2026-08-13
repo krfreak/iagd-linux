@@ -4,9 +4,9 @@ import {
   api, subscribe, ItemSummary, ItemCard as ItemCardData, ItemDetail, HostStatus, HostEvent,
   ItemFilters, RARITIES, LANGUAGE_NAMES,
   CollectionEntry, SetEntry, Settings, FilterCatalogue, FilterGroup, ModInfo, TransferTarget,
-  MergePreview, MergeProgressEvent,
+  MergePreview, MergeProgressEvent, ItemStatLine,
 } from './api';
-import { GrimText, ReplicaLine, stripGrimText } from './GrimText';
+import { GrimText, StatLine, stripGrimText } from './GrimText';
 import './style.css';
 
 const PAGE_SIZE = 60;
@@ -167,6 +167,30 @@ function clipboardText(cards: ItemCardData[]): string {
  */
 const HIDDEN_STAT_TYPES = new Set([3, 4, 5, 6, 35, 64, 77]);
 
+/**
+ * Upstream's ReplicaStatContainer, for the part that changes how a row is drawn.
+ *
+ * A set skill arrives as a run of type-80 rows — name, description, then one row per stat — and
+ * 80 has no colour of its own, so upstream walks the run and re-types it: the first row becomes
+ * a skill name (23), the second a description (21), and the rest stat rows (40). Without this
+ * the whole block is drawn in the default colour, which in a dark theme is very nearly the
+ * background.
+ *
+ * The counter is per item, and resets on any row that is not part of the run.
+ */
+function replicaRows(stats: ItemStatLine[]): ItemStatLine[] {
+  let stage = 0;
+  return stats.map((stat) => {
+    if (stat.textClass !== 80) {
+      stage = 0;
+      return stat;
+    }
+    const textClass = stage === 0 ? 23 : stage === 1 ? 21 : 40;
+    stage++;
+    return { ...stat, textClass };
+  });
+}
+
 function ItemCard({ card, selected, onSelect, onTransfer, transferring }: {
   card: ItemCardData;
   selected: boolean;
@@ -181,7 +205,7 @@ function ItemCard({ card, selected, onSelect, onTransfer, transferring }: {
   // Rows the tooltip repeats from the header, and the game's own "[Release Ctrl to Hide
   // Details]" prompt. Upstream hides exactly these (ReplicaStat.css) rather than showing a
   // card that says the item's name three times.
-  const body = stats.filter((s) => !HIDDEN_STAT_TYPES.has(s.textClass));
+  const body = replicaRows(stats.filter((s) => !HIDDEN_STAT_TYPES.has(s.textClass)));
 
   return (
     <article
@@ -207,9 +231,18 @@ function ItemCard({ card, selected, onSelect, onTransfer, transferring }: {
 
         <ul class="item__stats">
           {body.map((stat, index) => (
-            <li key={index} class={`stat stat--class-${stat.textClass}`}>
-              <ReplicaLine text={stat.text} />
-            </li>
+            /* Type 0 is the game's blank line between blocks; upstream draws it as a break
+               rather than as an empty row of text. A computed line has no row type at all. */
+            stat.textClass === 0
+              ? <li key={index} class="stat stat--break" />
+              : (
+                <li
+                  key={index}
+                  class={`stat stat--class-${stat.textClass} ${stat.section ? `stat--${stat.section}` : ''}`}
+                >
+                  <StatLine line={stat} />
+                </li>
+              )
           ))}
         </ul>
 

@@ -1,4 +1,5 @@
 import { JSX } from 'preact';
+import { ItemStatLine } from './api';
 
 /**
  * Grim Dawn marks up tooltip text with `^` plus a single letter, switching colour until the
@@ -99,6 +100,44 @@ export function ReplicaLine({ text }: { text: string }): JSX.Element {
   flush();
 
   return <>{parts}</>;
+}
+
+/**
+ * One tooltip line, drawn the way upstream draws that kind of line.
+ *
+ * Upstream has two renderers and picks between them by where the line came from, which is the
+ * whole of the colour scheme:
+ *
+ *   * a line **Grim Dawn drew** goes through ReplicaStat.tsx and is coloured by its row type —
+ *     type 34 is the "Granted Skills" heading, 19 the level requirement, 27 a component name.
+ *   * a line **computed from the game database** goes through ItemStat.tsx, which has no type to
+ *     work with and splits the line instead: the leading value in one colour, what it applies to
+ *     in another, and a modified skill's name in a third.
+ *
+ * This port had only the first, so every computed line — which is nearly every line, since only
+ * items looted with the hook attached have a captured tooltip — came out one flat colour.
+ */
+export function StatLine({ line }: { line: ItemStatLine }): JSX.Element {
+  if (line.modifier === null && line.label === null) {
+    return <ReplicaLine text={line.text} />;
+  }
+
+  return (
+    <>
+      {line.modifier && <span class="stat__modifier">{line.modifier}</span>}
+      {line.modifier && ' '}
+      {line.label && <span class="stat__label">{line.label}</span>}
+      {/*
+        Upstream draws the skill apart from the label and hangs its tier on a tooltip. The
+        separating space is explicit: upstream inherits one from the placeholder it replaced,
+        and the label is trimmed here, so without this the line reads "+2 toSigil of Consumption".
+      */}
+      {line.skill && line.label && ' '}
+      {line.skill && (
+        <span class="stat__skill" title={line.extras ?? undefined}>{line.skill}</span>
+      )}
+    </>
+  );
 }
 
 /** Plain text, for titles and anywhere colour would be noise. */
