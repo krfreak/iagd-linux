@@ -1162,6 +1162,9 @@ function App() {
     return match ? Number(match[1]) : null;
   });
   const [toast, setToast] = useState<string | null>(null);
+  // Bumped when the host finishes work that changes what an item looks like, to re-fetch a
+  // list that would otherwise keep showing what it was given before the work ran.
+  const [dataVersion, setDataVersion] = useState(0);
   // Pushed by the host while a merge runs. Held here rather than in the settings view because
   // that is where the event socket already is; a merge must not need a second connection.
   const [mergeProgress, setMergeProgress] = useState<MergeProgressEvent | null>(null);
@@ -1191,7 +1194,30 @@ function App() {
     const handle = setTimeout(() => { load(search).catch(() => {}); }, 200);
     return () => clearTimeout(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, JSON.stringify(filters), tab]);
+  }, [query, JSON.stringify(filters), tab, dataVersion]);
+
+  /*
+   * Reload once the host finishes reading Grim Dawn's data or analysing the collection.
+   *
+   * Both rewrite what a card is made of — names, icons, rarity colours, every computed stat
+   * line — and a list fetched before they ran keeps whatever it was given. That is a stale
+   * screen presenting as a bug: relics whose icons had just been read still showed the
+   * missing-icon placeholder, while the collection tab, opened afterwards, showed them.
+   *
+   * Watching the transition rather than the flag, so a client that opens mid-parse still
+   * refreshes when it ends.
+   */
+  const busy = Boolean(status?.parsingGameData || status?.analysing);
+  const wasBusy = useRef(busy);
+  useEffect(() => {
+    if (wasBusy.current && !busy) {
+      setDataVersion((v) => v + 1);
+      // A parse can add a mod, and both passes change what the filters can match.
+      api.mods().then(setMods).catch(() => {});
+      api.filters().then(setCatalogue).catch(() => {});
+    }
+    wasBusy.current = busy;
+  }, [busy]);
 
   useEffect(() => {
     api.status().then(setStatus).catch(() => {});

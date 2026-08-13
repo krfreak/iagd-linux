@@ -3,6 +3,8 @@
 A native Linux WIP build of [Item Assistant][iagd], the item stash manager for Grim Dawn. Same
 collection, same database file, no Wine for the app itself.
 
+This is a case study and a proof of concept. It is not a polished product, and it is not supported by the upstream.
+
 The game runs under Proton; only the small hook DLL that watches your stash is a Windows
 binary, and it is cross-compiled here with MinGW. Everything else — the loot importer, the
 search, the item stat engine, the UI — is .NET and Preact running natively.

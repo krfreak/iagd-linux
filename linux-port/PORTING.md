@@ -1051,6 +1051,30 @@ parse: Reading Grim Dawn's data…      ← visible in the status bar
 stats: …                              ← and the analysis that has to follow
 ```
 
+### A list fetched before a parse keeps what it was given
+
+After the icon fix, relics still showed the missing-icon placeholder in the item list while the
+collection tab, opened afterwards, showed them correctly. Same column, same file — the difference
+was *when* each view had last asked.
+
+The client fetched its page, the host then re-parsed and re-analysed in the background, and
+nothing told the page to ask again. Every card kept its pre-parse content: no icon, and before
+that no name, rarity colour or stat line either. It presents as a rendering bug and is a caching
+one.
+
+The client now watches `parsingGameData` and `analysing` for a true→false transition and
+re-fetches the list, the branch list and the filter catalogue when either finishes. Watching the
+transition rather than the flag matters: a client that opens mid-parse still refreshes at the
+end. Measured from a cold start against a collection needing both passes:
+
+```
+t+ 0.7s  status event: parsing=True  analysing=False
+t+13.0s  status event: parsing=True  analysing=True
+t+24.4s  status event: parsing=True  analysing=False
+t+26.4s  status event: parsing=False analysing=False
+t+26.6s  >>> REFETCH /api/items
+```
+
 ### Requirements are only shown when the game wrote them
 
 A captured tooltip carries "Required Player Level: 92" and "Required Physique: 805"; a computed
