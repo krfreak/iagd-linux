@@ -80,6 +80,18 @@ public sealed record HostStatus(
     string? ParseStep,
 
     /// <summary>
+    /// True while the collection is being analysed — the pass that fills in rarity, level and
+    /// the rolled values, and that writes the game stat rows the record-driven filters read.
+    ///
+    /// Separate from <see cref="ItemsNeedingStats"/>, which counts *items* waiting. A pass can
+    /// be running with that count at zero: a re-parse or a change to what the pass writes
+    /// invalidates the rows for a collection whose items are all described.
+    /// </summary>
+    bool Analysing,
+    /// <summary>What that pass is doing, for the status line.</summary>
+    string? AnalysisStep,
+
+    /// <summary>
     /// Items with no rarity yet, i.e. never seen by the precompute pass. Surfaced because the
     /// rarity and level filters read columns that pass fills in: without it, those filters
     /// return nothing at all and look broken rather than unpopulated. Upstream shows the same

@@ -18,6 +18,22 @@ namespace IAGrim.Host;
 /// </summary>
 public static class StatRefresh {
     /// <summary>
+    /// True while a pass is running, for the status the UI shows.
+    ///
+    /// The pass takes ten seconds or more and rewrites what every filter reads. Running it
+    /// silently means a client that looks finished while half its filters still match nothing —
+    /// which is exactly how the stale mastery rows presented: an idle-looking window, a full
+    /// collection, and an empty result.
+    /// </summary>
+    public static bool Running { get; private set; }
+
+    /// <summary>The last line the pass reported, or null when it is not running.</summary>
+    public static string? Step { get; private set; }
+
+    /// <summary>One pass at a time: it rewrites the tables every other query reads.</summary>
+    private static readonly SemaphoreSlim Gate = new(1, 1);
+
+    /// <summary>
     /// Describes items that have no rarity yet, using the stat rows already stored.
     ///
     /// This is the cheap half and it runs first, because it needs no game archives and takes
@@ -126,13 +142,22 @@ public static class StatRefresh {
         }
 
         return Task.Run(async () => {
+            if (!await Gate.WaitAsync(0, cancellationToken)) return;
+
             try {
+                Running = true;
+                Step = reason;
                 Console.WriteLine($"stats: {reason}; computing.");
                 await events.BroadcastAsync(
                     HostEvent.Message($"Analysing the collection: {reason}.", "info"), cancellationToken);
 
                 var service = new StatPrecomputeService(databasePath, gameDir);
-                var result = await Task.Run(() => service.Run(), cancellationToken);
+                var result = await Task.Run(() => service.Run(line => {
+                    if (string.IsNullOrWhiteSpace(line)) return;
+                    // Picked up by the status poll, which broadcasts when anything visible moves.
+                    Step = line.Trim();
+                    Console.WriteLine($"stats: {Step}");
+                }), cancellationToken);
 
                 Console.WriteLine($"stats: {result.ItemsComputed:N0} of {result.ItemsProcessed:N0} items rolled.");
                 await events.BroadcastAsync(
@@ -141,6 +166,11 @@ public static class StatRefresh {
             catch (Exception ex) {
                 // The collection is still perfectly usable without this; say so and carry on.
                 Console.Error.WriteLine($"stats: pass failed: {ex.Message}");
+            }
+            finally {
+                Running = false;
+                Step = null;
+                Gate.Release();
             }
         }, cancellationToken);
     }

@@ -72,6 +72,13 @@ export interface HostStatus {
   parsingGameData: boolean;
   /** What that parse is doing, for the status line. */
   parseStep: string | null;
+  /**
+   * True while the collection is being analysed. Distinct from itemsNeedingStats, which counts
+   * items waiting: a re-parse, or a change to what the pass writes, invalidates the rows for a
+   * collection whose items are all described, and that pass has to be visible too.
+   */
+  analysing: boolean;
+  analysisStep: string | null;
   /** True while the host is attaching the hook to the running game. */
   attaching: boolean;
 }

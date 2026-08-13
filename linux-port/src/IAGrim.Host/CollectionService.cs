@@ -551,6 +551,11 @@ public sealed class CollectionService {
             GameDataStale:    Staleness(paths, settings),
             Attaching:        attaching,
             ParsingGameData:  parsing,
-            ParseStep:        parseStep);
+            ParseStep:        parseStep,
+            // Read rather than passed: the pass is a static service reachable from every caller
+            // of this method, and threading it through four call sites would only make it
+            // possible for one of them to forget and report an idle client during a rebuild.
+            Analysing:        StatRefresh.Running,
+            AnalysisStep:     StatRefresh.Step);
     }
 }

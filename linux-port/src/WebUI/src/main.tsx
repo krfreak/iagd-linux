@@ -40,6 +40,20 @@ function StatusBar({ status }: { status: HostStatus | null }) {
     );
   }
 
+  // Analysing the collection: rarity, levels, rolled values, and the game stat rows every
+  // record-driven filter reads. Ten seconds or more, during which those filters legitimately
+  // match nothing — so saying nothing here makes a working client look broken.
+  if (status.analysing) {
+    return (
+      <div class="status status--warn">
+        <span class="dot dot--warn" /> Analysing the collection…
+        <span class="status__detail">
+          {status.analysisStep ?? 'the filters fill in as it finishes'}
+        </span>
+      </div>
+    );
+  }
+
   if (status.gameDataStale) {
     return (
       <div class="status status--warn">
@@ -1352,9 +1366,17 @@ function App() {
                     <section class="items">
                       {items.length === 0 && (
                         <div class="items__empty">
-                          {query || filteredRef.current
-                            ? 'Nothing matching those filters.'
-                            : 'No items yet — loot something into your stash.'}
+                          {/*
+                            While the analysis runs, the record-driven filters — mastery, damage
+                            type, slot — genuinely match nothing, because the rows they read are
+                            being rewritten. "Nothing matching those filters" is true and
+                            useless: it reads as a broken filter rather than one waiting.
+                          */}
+                          {status?.analysing
+                            ? 'Analysing the collection — filters fill in as it finishes.'
+                            : query || filteredRef.current
+                              ? 'Nothing matching those filters.'
+                              : 'No items yet — loot something into your stash.'}
                         </div>
                       )}
                       {items.map((card) => (
@@ -1455,13 +1477,18 @@ function App() {
               <em>
                 {status?.parsingGameData
                   ? (status.parseStep ?? 'working')
-                  : 'reads item names, icons and skills, then analyses the collection'}
+                  : status?.analysing
+                    ? (status.analysisStep ?? 'analysing the collection')
+                    : 'reads item names, icons and skills, then analyses the collection'}
               </em>
             </div>
             <dl class="tabpage__facts">
               <dt>Installation</dt><dd>{status?.gameDir ?? 'not found'}</dd>
               <dt>Templates parsed</dt><dd>{status?.templateCount?.toLocaleString() ?? '0'}</dd>
               <dt>Items awaiting analysis</dt><dd>{status?.itemsNeedingStats?.toLocaleString() ?? '0'}</dd>
+              {/* The second half of the same job, and the one with no item count behind it. */}
+              <dt>Analysis</dt>
+              <dd>{status?.analysing ? (status.analysisStep ?? 'running') : 'up to date'}</dd>
             </dl>
             <h3>Mods</h3>
             <table class="tabpage__table">
