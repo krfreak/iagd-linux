@@ -802,6 +802,13 @@ has emptied `DatabaseItemStat_v2`. It runs in the background and reports through
 channel a merge uses; the collection stays usable throughout, just incompletely described. The
 command still exists for when you want it immediately.
 
+### Links this port does not carry
+
+Upstream's nav has Discord and Patreon links. They are deliberately absent here and should stay
+absent: this is an unaffiliated port, and those are somebody else's community and somebody else's
+funding. Reproducing them would imply a connection that does not exist, and would put support
+requests for this code in front of people who did not write it.
+
 ### Which description a card shows
 
 Upstream's precedence, reproduced: the captured tooltip when the item has one, the computed

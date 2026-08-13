@@ -1150,12 +1150,14 @@ function App() {
                         {label}
                       </a>
                     ))}
+                    {/* Upstream's nav also carries Discord and Patreon links. This port does not
+                        reproduce them and should not: it is an unaffiliated port, and those are
+                        somebody else's community and somebody else's funding. Sending this
+                        project's users there would imply a connection that does not exist and
+                        put support requests for this code in front of people who did not write
+                        it. Do not add them back. */}
                     <a onClick={() => window.open('https://grimdawn.evilsoft.net/enchantments/', '_blank')}>
                       Components
-                    </a>
-                    <a onClick={() => window.open('https://discord.gg/5wuCPbB', '_blank')}>Discord</a>
-                    <a onClick={() => window.open('https://www.patreon.com/itemassistant', '_blank')}>
-                      Patreon
                     </a>
                   </nav>
 
