@@ -305,13 +305,27 @@ function FilterSidebar({ filters, onChange, catalogue }: {
   const comparisonFor = (fields: string[]) =>
     (filters.stat ?? []).find((s) => fieldsOf(s) === fields.join('+'));
 
-  const setComparison = (fields: string[], operator: string, value: string) => {
-    const rest = (filters.stat ?? []).filter((s) => fieldsOf(s) !== fields.join('+'));
+  /**
+   * The comparisons other than this group's, which is what every edit to one starts from.
+   *
+   * Pure, and deliberately so: `patch` spreads the *current* props, so two patches in one event
+   * handler make the second overwrite the first. That is not hypothetical — unchecking a box
+   * with a comparison on it patched `has`, then patched `stat` from the unchanged filters, and
+   * put `has` back exactly as it was. The box could not be unchecked.
+   */
+  const comparisonsWithout = (fields: string[]) =>
+    (filters.stat ?? []).filter((s) => fieldsOf(s) !== fields.join('+'));
+
+  const comparisons = (fields: string[], operator: string, value: string) => {
+    const rest = comparisonsWithout(fields);
     const next = value.trim() === ''
       ? rest
       : [...rest, `${fields.join('+')}${operator}${value.trim()}`];
-    patch({ stat: next.length ? next : undefined });
+    return next.length ? next : undefined;
   };
+
+  const setComparison = (fields: string[], operator: string, value: string) =>
+    patch({ stat: comparisons(fields, operator, value) });
 
   const statBox = (group: FilterGroup) => {
     const on = activeGroups.has(key(group.fields));
@@ -328,9 +342,13 @@ function FilterSidebar({ filters, onChange, catalogue }: {
             onChange={(e) => {
               const checked = (e.target as HTMLInputElement).checked;
               const rest = (filters.has ?? []).filter((g) => key(g) !== key(group.fields));
-              patch({ has: checked ? [...rest, group.fields] : rest.length ? rest : undefined });
-              // Upstream's numeric filter lives on the checkbox and goes with it.
-              if (!checked) setComparison(group.fields, operator, '');
+              // One patch, not two: upstream's numeric filter lives on the checkbox and goes
+              // with it, and both changes have to land in the same update.
+              const kept = comparisonsWithout(group.fields);
+              patch({
+                has: checked ? [...rest, group.fields] : rest.length ? rest : undefined,
+                stat: checked ? filters.stat : (kept.length ? kept : undefined),
+              });
             }}
           />
           <span>{group.label}</span>
