@@ -1001,8 +1001,74 @@ body {
 }
 .tabpage__table th { color: var(--text-dim); font-weight: 400; }
 
-.help { max-width: 700px; }
-.help h2 { margin-top: 0; color: var(--accent); }
+/* --- the help page -------------------------------------------------------- */
+.help { max-width: 760px; padding-bottom: 24px; }
+.help h2 { margin-top: 0; color: var(--accent); font-size: 15px; }
+.help__empty { color: var(--text-dim); }
+
+.help__search {
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 12px;
+  padding: 6px 10px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.help__entry { border-bottom: 1px solid var(--border); }
+
+/* An accordion, because thirty answers listed in full is a wall rather than a page. */
+.help__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 2px;
+  background: none;
+  border: 0;
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.help__head:hover { color: var(--accent); }
+.help__title { flex: 1; }
+
+.help__badge {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 9px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.help__badge--help { background: #5a3a1a; color: #e3ba6b; }
+.help__badge--info { background: #1e3a4a; color: #6bb8e3; }
+.help__badge--port { background: #2a3a2a; color: #7ec77e; }
+
+.help__body {
+  padding: 2px 2px 14px;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.help__body ol, .help__body ul { margin: 6px 0; padding-left: 22px; }
+.help__body li { margin: 2px 0; }
+.help__body img { max-width: 100%; margin: 8px 0; border-radius: 3px; }
+.help__body .attention { color: var(--warn); font-weight: 600; }
+
+/* Where upstream's answer holds but its path or its button does not. */
+.help__note {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border-left: 2px solid var(--accent);
+  background: var(--surface);
+  color: var(--text);
+}
+.help__note strong { color: var(--accent); }
 
 /* --- the status bar ------------------------------------------------------- */
 .statusbar {

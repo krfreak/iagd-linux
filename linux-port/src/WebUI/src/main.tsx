@@ -7,6 +7,7 @@ import {
   MergePreview, MergeProgressEvent, ItemStatLine,
 } from './api';
 import { GrimText, StatLine, stripGrimText } from './GrimText';
+import { Help } from './Help';
 import './style.css';
 
 const PAGE_SIZE = 60;
@@ -1420,24 +1421,7 @@ function App() {
                 <main class="webview__body">
                   {view === 'collections' && <CollectionView filters={search} />}
                   {view === 'sets' && <SetsView query={query} />}
-                  {view === 'help' && (
-                    <div class="help">
-                      <h2>Help</h2>
-                      <p>
-                        Items are captured by a hook inside Grim Dawn, which the port attaches
-                        once the game is running. The status line at the bottom says whether that
-                        has happened.
-                      </p>
-                      <p>
-                        Transfers go the other way: an item is queued here and appears the next
-                        time you open the transfer stash in game.
-                      </p>
-                      <p>
-                        Upstream's help page is served from the internet and is not reproduced
-                        here.
-                      </p>
-                    </div>
-                  )}
+                  {view === 'help' && <Help />}
 
                   {view === 'items' && (
                     <section class="items">

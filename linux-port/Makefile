@@ -12,12 +12,21 @@ APP    := src/IAGrim.App/IAGrim.App.csproj
 HOST   := src/IAGrim.Host/IAGrim.Host.csproj
 CLI    := tools/iagd/iagd.csproj
 
-.PHONY: all ui icon app cli run host verify package clean
+.PHONY: all ui help icon app cli run host verify package clean
 
 all: ui app cli
 
-ui: $(WEBUI)/node_modules
+ui: $(WEBUI)/node_modules help
 	cd $(WEBUI) && npm run build
+
+## The help page, read out of upstream's pinned submodule rather than copied into this
+## repository — the same rule the hook and the injector follow. See scripts/extract-help.py.
+help:
+	@python3 scripts/extract-help.py \
+		../iagd/WebUI/src/containers/help/Help.tsx \
+		$(WEBUI)/help-notes.json \
+		$(WEBUI)/src/generated/help.json \
+		$(WEBUI)/public/help
 
 $(WEBUI)/node_modules: $(WEBUI)/package.json
 	cd $(WEBUI) && npm install
@@ -55,6 +64,7 @@ verify:
 	@bash ./scripts/verify-schema.sh
 	@bash ./scripts/verify-search-filters.sh
 	@bash ./scripts/verify-stat-rendering.sh
+	@bash ./scripts/verify-help.sh
 
 # A relocatable, self-contained package: AppDir + tarball, and an AppImage when appimagetool
 # is installed. See packaging/build-appimage.sh for why this is not a Flatpak.

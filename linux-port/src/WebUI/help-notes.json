@@ -1,0 +1,82 @@
+{
+  "_comment": [
+    "The editorial layer over upstream's help page. Upstream's text is read from the pinned",
+    "submodule at build time and is not copied into this repository; what lives here is the",
+    "judgement about it.",
+    "",
+    "exclude: entries whose answer would be wrong here — a feature this port does not have, or",
+    "advice that only makes sense on Windows. The reason is for whoever reads this next.",
+    "keep:    entries reviewed and correct here exactly as upstream wrote them.",
+    "notes:   entries kept as upstream wrote them, with a line added where the Linux answer",
+    "         differs (a path, a button, a folder).",
+    "own:     questions only this port can answer. No upstream text.",
+    "",
+    "scripts/verify-help.sh reports entries upstream has added that nobody has classified yet."
+  ],
+
+  "exclude": {
+    "StashError": "answer is 'run IA as administrator'; there is no such thing here",
+    "PathError": "same — reinstall elsewhere or run as administrator",
+    "No32Bit": "a status message this port does not produce; Proton runs the 64-bit build",
+    "SSLAntiVirusIssues": "Windows anti-virus breaking cloud backup, which is not implemented",
+    "Avasted": "Windows anti-virus deleting the installed files",
+    "4K": "Windows DPI compatibility mode",
+    "StoreOnDifferentDisk": "mklink and %appdata%; this port has a database path setting instead",
+    "DelayWhenSearching": "a setting this port does not have",
+    "FindLogFiles": "points at %appdata% and a View Logs button; see 'Where does this port keep things'",
+    "RegularUpdates": "upstream's own updater",
+    "MultiplePcs": "depends on cloud backup, which is not implemented",
+    "OnlineBackups": "cloud backup is not implemented",
+    "email-whiners": "cloud backup is not implemented, so no e-mail is ever asked for",
+    "BuddyItems": "buddy sharing is not implemented",
+    "WhatIsBuddyId": "buddy sharing is not implemented",
+    "WhatIsBuddyNickname": "buddy sharing is not implemented"
+  },
+
+  "keep": {
+    "GenericStatNoReplica": "the captured-vs-computed distinction is the same here",
+    "ItemClassificationReturn": "this port refuses the same items the hook does",
+    "ReproduceStats": "true here too — items are stored and returned unchanged"
+  },
+
+  "notes": {
+    "ExpansionsDisabledItemsMissing": "The mod dropdown is in the toolbar above the item list, and it also carries the hardcore branch — one entry per (mod, hardcore) pair your collection holds.",
+    "CantFindItemsMod": "Same dropdown, in the toolbar above the list rather than the upper right corner.",
+    "SupportsHardcore": "Softcore and hardcore appear as separate entries in the toolbar's mod dropdown once you own items in both.",
+    "FindBackups": "This port keeps its backups in ~/.local/share/iagd-linux/backup, and takes one automatically before a merge or a parse.",
+    "FindUserdataDb": "Here it is ~/.local/share/iagd-linux/userdata.db. It is upstream's schema exactly, so a database from a Windows install opens directly and vice versa.",
+    "RestoreBackup": "On Linux: close the client, then copy the file over ~/.local/share/iagd-linux/userdata.db. Backups this port took are in ~/.local/share/iagd-linux/backup.",
+    "StartFromZero": "On Linux: close the client and delete ~/.local/share/iagd-linux/userdata.db.",
+    "CannotFindGrimdawn": "This port finds Grim Dawn through Steam's library folders, and the Grim Dawn tab lets you point at it by hand.",
+    "MissingIcons": "Icons are read when the game's data is parsed, which this client does by itself — at startup when the game has been patched, and whenever it has learned to read something new.",
+    "GrimDawnUpdated": "This client re-reads the game's data by itself when Grim Dawn has been patched; the Grim Dawn tab can start it again at any time.",
+    "NotEnoughStashTabs": "Which tabs are used is set in the Settings tab, and the Grim Dawn tab shows which ones the hook will actually read."
+  },
+
+  "own": [
+    {
+      "tag": "LinuxHowItWorks",
+      "title": "How does this work on Linux?",
+      "type": "none",
+      "html": "Grim Dawn runs under Proton, and this client attaches the same hook upstream uses to the running game. The status line at the bottom says whether that has happened — a collection still works when it has not, it just stops growing.<br><br>Attaching is automatic: the client waits for the game's window to exist and retries by itself, so starting either program first is fine."
+    },
+    {
+      "tag": "LinuxTransfers",
+      "title": "How do transfers work?",
+      "type": "none",
+      "html": "Transfers go the other way: an item is queued here and appears the next time you open the transfer stash in game. The game has to be running with the hook attached, and the item leaves this collection only once the game has taken it."
+    },
+    {
+      "tag": "LinuxPaths",
+      "title": "Where does this port keep things?",
+      "type": "none",
+      "html": "<ul><li><i>~/.local/share/iagd-linux/userdata.db</i> — the collection, in upstream's schema</li><li><i>~/.local/share/iagd-linux/backup</i> — automatic copies, taken before a merge or a parse</li><li><i>~/.local/share/iagd-linux/storage</i> — item icons, extracted from the game</li></ul>The client writes its log to the terminal it was started from rather than to a file."
+    },
+    {
+      "tag": "LinuxNotImplemented",
+      "title": "What is missing compared with the Windows version?",
+      "type": "none",
+      "html": "Cloud backup and buddy sharing are not implemented, so nothing here asks for an e-mail address and nothing is sent anywhere. Everything else — looting, transfers, the filters, the collection and set views — is a port of what upstream does, checked against its source rather than guessed at."
+    }
+  ]
+}

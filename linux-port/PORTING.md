@@ -1051,6 +1051,45 @@ parse: Reading Grim Dawn's data…      ← visible in the status bar
 stats: …                              ← and the analysis that has to follow
 ```
 
+### The help page
+
+Upstream keeps its help as a 500-line TSX file: thirty entries, each a title, a tag, a
+Help/Informational badge and a body of small JSX. `scripts/extract-help.py` reads that file out
+of the pinned submodule at build time and writes JSON the Help tab renders.
+
+**Generated, never committed** — the same rule the hook and the injector follow. What this
+repository carries is the porting work and the editorial layer, `src/WebUI/help-notes.json`.
+
+The body conversion is deliberately narrow. Upstream's bodies use a closed set of constructs —
+`<br/>`, `<i>`, `<b>`, `<span className="attention">`, `<img>`, a numbered-list helper and one
+shared "close GD, load the database" fragment — so each is handled explicitly and anything
+unrecognised is *reported and skipped* rather than guessed at. A silent mistranslation would put
+wrong instructions in front of a user.
+
+Every tag is classified in help-notes.json under exactly one of:
+
+| | |
+| --- | --- |
+| `keep` | correct here exactly as upstream wrote it (3 entries) |
+| `notes` | correct, with a line added for the Linux path or button (11) |
+| `exclude` | would be wrong here, and why (16) |
+
+Sixteen excluded is a lot, and each earns it: "run IA as administrator" has no meaning on Linux,
+Windows anti-virus and DPI scaling do not apply, and buddy sharing, cloud backup and upstream's
+own updater are not implemented — so their help would describe settings that are not there. Four
+entries of this port's own cover what only it can answer: how the hook attaches under Proton,
+how transfers work, where files live, and what is missing compared with the Windows version.
+
+Inclusion is the *default*, so an entry upstream adds appears here without anyone deciding it
+should — right for a port, and the reason `scripts/verify-help.sh` exists: it fails when upstream
+has a tag nobody has classified, or when help-notes.json still classifies one upstream has
+dropped.
+
+Upstream ends its page with a link to its Discord. This port does not reproduce it, for the same
+reason its nav carries no Discord or Patreon link: it is an unaffiliated port, and that is
+somebody else's community. `verify-help.sh` does not police this, but the page is checked to
+contain no such link.
+
 ### A list fetched before a parse keeps what it was given
 
 After the icon fix, relics still showed the missing-icon placeholder in the item list while the
