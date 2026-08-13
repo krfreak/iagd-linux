@@ -41,6 +41,20 @@ const LINKS: Link[] = [
   },
 ];
 
+/** This port's own home, so "not his problem" has somewhere to point. */
+const PORT_LINKS: Link[] = [
+  {
+    url: 'https://github.com/krfreak/iagd-linux',
+    label: 'The Linux port',
+    detail: 'This client: its source, its build instructions and what it does differently.',
+  },
+  {
+    url: 'https://github.com/krfreak/iagd-linux/issues',
+    label: 'Report a problem with the port',
+    detail: 'Anything that only happens on Linux — the hook, Proton, the window, this UI.',
+  },
+];
+
 export function Support() {
   const open = (url: string) => {
     api.open(url).then((result) => {
@@ -75,10 +89,27 @@ export function Support() {
         ))}
       </div>
 
+      <h3>Something wrong with this client?</h3>
+
+      <p>
+        Anything Linux, Proton or Wine is the port's problem, not his. Taking it to him means a
+        bug report about code he did not write, for a platform he does not ship — so it goes
+        here instead.
+      </p>
+
+      <div class="support__links">
+        {PORT_LINKS.map((link) => (
+          <button key={link.url} class="support__link" onClick={() => open(link.url)}>
+            <span class="support__label">{link.label}</span>
+            <span class="support__detail">{link.detail}</span>
+            <span class="support__url">{link.url}</span>
+          </button>
+        ))}
+      </div>
+
       <p class="support__note">
-        Bugs in <em>this</em> client — anything Linux, Proton or Wine — are the port's problem and
-        should not go to him. Nothing on this page reports anything anywhere; the links open in
-        your browser and that is all they do.
+        Nothing on this page reports anything anywhere; the links open in your browser and that
+        is all they do.
       </p>
     </div>
   );

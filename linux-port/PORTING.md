@@ -1109,6 +1109,12 @@ The Discord stays out. Sending a Linux port's users into upstream's community pu
 code its maintainer did not write in front of him, which a page called Support would make more
 likely rather than less. That was the original objection and it survives the exception.
 
+The page carries this port's own repository as well, and that is the other half of its job.
+"Do not take Linux problems to him" is only useful next to where they *should* go: a client that
+names no home for its own bugs sends them to the one name it does show, which is exactly the
+failure the page exists to prevent. `github.com/krfreak/iagd-linux`, and its issue tracker, are
+allowlisted alongside the three above.
+
 **Opening them needs the host.** The app window is a WebKitGTK view with no external-link
 handling, so an anchor would navigate the client itself onto the page with no way back.
 `POST /api/open` runs `xdg-open`, and it is **allowlisted to exactly those three URLs** — it is

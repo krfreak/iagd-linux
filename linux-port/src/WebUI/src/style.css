@@ -1004,6 +1004,7 @@ body {
 /* --- the support page ----------------------------------------------------- */
 .support { max-width: 640px; padding-bottom: 24px; }
 .support h2 { margin-top: 0; color: var(--accent); font-size: 15px; }
+.support h3 { margin: 22px 0 0; color: var(--text); font-size: 13px; }
 .support p { color: var(--text-dim); font-size: 13px; line-height: 1.6; }
 .support strong { color: var(--text); }
 

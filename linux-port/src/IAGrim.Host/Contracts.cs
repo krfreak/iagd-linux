@@ -149,7 +149,17 @@ public static class SupportLinks {
     public const string Source = "https://github.com/marius00/iagd";
     public const string Patreon = "https://www.patreon.com/itemassistant";
 
-    private static readonly HashSet<string> Allowed = [Website, Source, Patreon];
+    /// <summary>
+    /// This port's own repository — the other half of the page's job.
+    ///
+    /// Saying "do not take Linux problems to him" is only useful alongside where they *should*
+    /// go, and a client that names no home for its own bugs sends them to the one name it does
+    /// show. That is the failure this page exists to prevent.
+    /// </summary>
+    public const string Port = "https://github.com/krfreak/iagd-linux";
+    public const string PortIssues = "https://github.com/krfreak/iagd-linux/issues";
+
+    private static readonly HashSet<string> Allowed = [Website, Source, Patreon, Port, PortIssues];
 
     public static bool Contains(string url) => Allowed.Contains(url);
 }

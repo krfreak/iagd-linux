@@ -13,7 +13,6 @@
     "",
     "scripts/verify-help.sh reports entries upstream has added that nobody has classified yet."
   ],
-
   "exclude": {
     "StashError": "answer is 'run IA as administrator'; there is no such thing here",
     "PathError": "same — reinstall elsewhere or run as administrator",
@@ -32,13 +31,11 @@
     "WhatIsBuddyId": "buddy sharing is not implemented",
     "WhatIsBuddyNickname": "buddy sharing is not implemented"
   },
-
   "keep": {
     "GenericStatNoReplica": "the captured-vs-computed distinction is the same here",
     "ItemClassificationReturn": "this port refuses the same items the hook does",
     "ReproduceStats": "true here too — items are stored and returned unchanged"
   },
-
   "notes": {
     "ExpansionsDisabledItemsMissing": "The mod dropdown is in the toolbar above the item list, and it also carries the hardcore branch — one entry per (mod, hardcore) pair your collection holds.",
     "CantFindItemsMod": "Same dropdown, in the toolbar above the list rather than the upper right corner.",
@@ -52,13 +49,12 @@
     "GrimDawnUpdated": "This client re-reads the game's data by itself when Grim Dawn has been patched; the Grim Dawn tab can start it again at any time.",
     "NotEnoughStashTabs": "Which tabs are used is set in the Settings tab, and the Grim Dawn tab shows which ones the hook will actually read."
   },
-
   "own": [
     {
       "tag": "LinuxHowItWorks",
       "title": "How does this work on Linux?",
       "type": "none",
-      "html": "Grim Dawn runs under Proton, and this client attaches the same hook upstream uses to the running game. The status line at the bottom says whether that has happened — a collection still works when it has not, it just stops growing.<br><br>Attaching is automatic: the client waits for the game's window to exist and retries by itself, so starting either program first is fine."
+      "html": "Grim Dawn runs under Proton, and this client attaches the same hook upstream uses to the running game. The status line at the bottom says whether that has happened — a collection still works when it has not, it just stops growing.<br><br>Attaching is automatic: the client waits for the game's window to exist and retries by itself, so starting either program first is fine.<br><br>This is an unaffiliated port of Item Assistant. Its source, and where to report a problem with it, are on the Support tab."
     },
     {
       "tag": "LinuxTransfers",
@@ -76,7 +72,7 @@
       "tag": "LinuxNotImplemented",
       "title": "What is missing compared with the Windows version?",
       "type": "none",
-      "html": "Cloud backup and buddy sharing are not implemented, so nothing here asks for an e-mail address and nothing is sent anywhere. Everything else — looting, transfers, the filters, the collection and set views — is a port of what upstream does, checked against its source rather than guessed at."
+      "html": "Cloud backup and buddy sharing are not implemented, so nothing here asks for an e-mail address and nothing is sent anywhere. Everything else — looting, transfers, the filters, the collection and set views — is a port of what upstream does, checked against its source rather than guessed at. The port lives at <i>github.com/krfreak/iagd-linux</i>, which is also where anything wrong with <b>this</b> client belongs — see the Support tab."
     }
   ]
 }

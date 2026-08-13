@@ -5,6 +5,12 @@ collection, same database file, no Wine for the app itself.
 
 This is a case study and a proof of concept. It is not a polished product, and it is not supported by the upstream.
 
+A lot of the plumbing underneath had to be changed in order to make this run natively, and the UI is a single-page
+Preact app instead of a WinForms one. The port is not feature-complete, but it is enough to manage a collection
+and transfer items to and from the stash. The upstream's item search and filters are fully implemented, and the collection
+view is complete. The mod support is functional, and the GD Stash import/export works.
+The hook DLL that watches your stash is cross-compiled with MinGW and runs under Proton, but everything else is .NET and Preact running natively.
+
 The game runs under Proton; only the small hook DLL that watches your stash is a Windows
 binary, and it is cross-compiled here with MinGW. Everything else — the loot importer, the
 search, the item stat engine, the UI — is .NET and Preact running natively.
@@ -19,6 +25,7 @@ back on.
 **Use at your own risk. This might destroy your items. Back them up.**
 **The original Item Assistant is maintained by [marius00](https://github.com/marius00). Support their effort over at [the official site](https://grimdawn.evilsoft.net/).**
 **Do not bug them about the work in this repository nor ask them for support.**
+**Anything that only happens on Linux belongs [here][issues] instead — the hook, Proton, the window, the UI.**
 
 This version has been tested on archlinux with GD running in Proton-GE 11-1 and against the upstream Windows version @1.5.9693.21779.
 
@@ -46,7 +53,7 @@ not have a translation framework.
 Needs the .NET 10 SDK, Node 20+, `mingw-w64` and `sqlite3`.
 
 ```bash
-git clone --recurse-submodules https://github.com/<you>/iagd-linux
+git clone --recurse-submodules https://github.com/krfreak/iagd-linux
 cd iagd-linux
 make            # prepare + hook + injector + app
 make run        # the desktop window
@@ -111,3 +118,4 @@ MIT — see [LICENSE](LICENSE). Item Assistant is MIT © marius00, proton-inject
 JokelBaf; neither is redistributed here.
 
 [iagd]: https://github.com/marius00/iagd
+[issues]: https://github.com/krfreak/iagd-linux/issues
