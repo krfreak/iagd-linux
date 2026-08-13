@@ -350,15 +350,30 @@ internal static class Program {
     /// Items.arc per expansion. Extraction skips anything already present, so re-running is
     /// cheap.
     /// </summary>
+    /// <summary>
+    /// The archives icons are extracted from: Items.arc per expansion, and **Level Art.arc**
+    /// with it.
+    ///
+    /// The second one is not an oversight of the game's: a handful of items are world objects
+    /// the player can pick up, so their textures live with the level art rather than with the
+    /// item icons. Lokarr's set is the visible case — four pieces that had no picture in the
+    /// list until this was added. Upstream reads both, for the base game and every expansion
+    /// (ArzParser: LoadIconsOrWarn(items.arc), LoadIconsOrWarn("Level Art.arc")).
+    ///
+    /// It costs little despite Level Art.arc being gigabytes: the extractor skips anything over
+    /// 45 KB, so almost nothing in there qualifies. Measured on this installation, the four
+    /// level-art archives add about six seconds and seven icons.
+    /// </summary>
     private static IEnumerable<string> FindItemArchives(string gameDir) {
-        foreach (var relative in new[] {
-                     Path.Combine("resources", "Items.arc"),
-                     Path.Combine("gdx1", "resources", "Items.arc"),
-                     Path.Combine("gdx2", "resources", "Items.arc"),
-                     Path.Combine("gdx3", "resources", "Items.arc"),
-                 }) {
-            var path = Path.Combine(gameDir, relative);
-            if (File.Exists(path)) yield return path;
+        string[] expansions = ["", "gdx1", "gdx2", "gdx3"];
+
+        foreach (var expansion in expansions) {
+            foreach (var archive in new[] { "Items.arc", "Level Art.arc" }) {
+                var path = expansion.Length == 0
+                    ? Path.Combine(gameDir, "resources", archive)
+                    : Path.Combine(gameDir, expansion, "resources", archive);
+                if (File.Exists(path)) yield return path;
+            }
         }
     }
 

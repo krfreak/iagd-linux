@@ -812,6 +812,20 @@ has emptied `DatabaseItemStat_v2`. It runs in the background and reports through
 channel a merge uses; the collection stays usable throughout, just incompletely described. The
 command still exists for when you want it immediately.
 
+### Icons come from two archives, not one
+
+A few items are world objects the player can pick up, so their textures live with the level art
+rather than with the item icons. Lokarr's four pieces are the visible case: they had names and
+stats in the list and no picture at all.
+
+Upstream reads both — `LoadIconsOrWarn(items.arc)` and `LoadIconsOrWarn("Level Art.arc")`, for
+the base game and every expansion — and this port read only the first. It reads both now.
+
+The cost is small despite those archives being gigabytes, because the extractor skips anything
+over 45 KB and almost no level art is that small: measured here, the four of them add about six
+seconds to a parse and seven icons, four of which are Lokarr's. Upstream's own storage folder on
+this machine holds 4,030 icons including those signs, which is what pointed at the answer.
+
 ### What may enter a collection
 
 Item Assistant has never collected everything the game drops. The hook decides as an item is
