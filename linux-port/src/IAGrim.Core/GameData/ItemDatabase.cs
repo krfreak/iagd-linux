@@ -282,7 +282,7 @@ public static class ItemDatabase {
                 SetRecord        = Text(stats, "itemSetName"),
                 SetName          = setTag is not null && tags.TryGetValue(setTag, out var setName)
                                        ? ResolveName(setName) : setTag,
-                Bitmap           = Text(stats, "bitmap"),
+                Bitmap           = BestBitmap(stats),
                 LevelRequirement = (int)(Number(stats, "levelRequirement") ?? 0),
             };
         }
@@ -367,6 +367,51 @@ public static class ItemDatabase {
         }
         return lookup;
     }
+
+    /// <summary>
+    /// What a parse produces, as a number that changes when the parse does.
+    ///
+    /// A Grim Dawn patch is not the only reason stored game data goes out of date: teaching this
+    /// class to read a field it did not read before leaves every collection parsed until then
+    /// missing it, with the game on disk unchanged so no other check notices. Relics kept a blank
+    /// icon through any number of re-analyses for exactly that reason — an icon is chosen at
+    /// parse time, and re-analysing is a different pass entirely.
+    ///
+    /// Raise this whenever what a parse writes changes. See also
+    /// <see cref="ItemStats.StatPrecomputeService.Version"/>, which does the same for the pass
+    /// after it.
+    /// </summary>
+    public const int Version = 2;
+
+    /// <summary>Where that number is kept, alongside the parse's other provenance.</summary>
+    public const string VersionKey = "gamedata.parserVersion";
+
+    /// <summary>
+    /// Which stat holds an item's icon, and which to prefer when a record carries several.
+    ///
+    /// Upstream's table, scores and all, from <c>DatabaseItemStatDaoImpl.MapItemBitmaps</c>.
+    /// Most items say <c>bitmap</c>, but a relic says <c>artifactBitmap</c>, a shard says
+    /// <c>shardBitmap</c> and so on — and this port read only <c>bitmap</c>, so every relic in a
+    /// collection had a blank icon no matter how often the game data was re-read.
+    ///
+    /// The scores matter where a record has more than one: a relic's formula carries both
+    /// <c>artifactFormulaBitmapName</c> and the relic's own bitmap, and the relic is the picture
+    /// worth showing.
+    /// </summary>
+    private static readonly (string Stat, int Score)[] BitmapStats = [
+        ("bitmap", 10),
+        ("relicBitmap", 8),
+        ("shardBitmap", 6),
+        ("artifactBitmap", 4),
+        ("noteBitmap", 2),
+        ("artifactFormulaBitmapName", 0),
+    ];
+
+    private static string? BestBitmap(IReadOnlyDictionary<string, IItemStat> stats) =>
+        BitmapStats
+            .OrderByDescending(candidate => candidate.Score)
+            .Select(candidate => Text(stats, candidate.Stat))
+            .FirstOrDefault(value => value is not null);
 
     private static string? Text(IReadOnlyDictionary<string, IItemStat> stats, string key) =>
         stats.TryGetValue(key, out var stat) && !string.IsNullOrWhiteSpace(stat.TextValue)

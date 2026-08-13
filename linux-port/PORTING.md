@@ -1004,6 +1004,53 @@ computed, so "the computed renderer has no colours" meant "the client has no col
 how the lines came out. There is nothing stored to check — a computed line is built per request —
 so rendering the collection is the only way to know it renders correctly.
 
+### An item's icon is not always in `bitmap`
+
+Relics showed a blank icon, and re-analysing never helped. The record says:
+
+```
+Class          ItemArtifact
+artifactBitmap items/gearrelics/tier1/tier1_relic_02.tex
+```
+
+Most records name their icon in `bitmap`, which is all this port read. Upstream reads six stats
+and scores them, in `DatabaseItemStatDaoImpl.MapItemBitmaps`:
+
+| Stat | Score |
+| --- | --- |
+| `bitmap` | 10 |
+| `relicBitmap` | 8 |
+| `shardBitmap` | 6 |
+| `artifactBitmap` | 4 |
+| `noteBitmap` | 2 |
+| `artifactFormulaBitmapName` | 0 |
+
+Highest wins where a record carries several — a relic's formula names both the formula's picture
+and the relic's, and the relic is the one worth showing. The table is ported as-is.
+
+The icons were never missing from disk: `tier1_relic_02.tex.png` had been extracted all along.
+Nothing linked the record to it. Across this collection the fix takes named templates with an
+icon from 8,286 to 9,624, and owned items missing one from 12 to **0**.
+
+### Derived data has a version, and so does the parse
+
+Re-analysing could not have fixed those icons: an icon is chosen at **parse** time, and the
+analysis pass is a later, separate step. Nor would the staleness check have noticed — the game on
+disk had not changed, so `gamedata.sourceTimestamp` still matched.
+
+That is the same trap as the stale mastery rows, one stage earlier, so it gets the same
+treatment. `ItemDatabase.Version` is stamped into `GameDataMeta` beside the parse's other
+provenance, and `GameDataStatus` reports "read by an older version of this client" when what is
+stored is behind. Raise it whenever a parse writes something new. Its sibling is
+`StatPrecomputeService.Version` for the pass after it, and between them a client that has learned
+to read more brings an existing collection up to date on its own:
+
+```
+parse: Grim Dawn's item database was read by an older version of this client.
+parse: Reading Grim Dawn's data…      ← visible in the status bar
+stats: …                              ← and the analysis that has to follow
+```
+
 ### Requirements are only shown when the game wrote them
 
 A captured tooltip carries "Required Player Level: 92" and "Required Physique: 805"; a computed

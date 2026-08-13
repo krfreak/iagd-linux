@@ -297,6 +297,7 @@ public sealed class GameDataStore : IDisposable {
     /// </summary>
     public void RecordParseSource(long sourceTimestamp, string language) {
         using var transaction = _connection.BeginTransaction();
+        SetMeta(transaction, ItemDatabase.VersionKey, ItemDatabase.Version.ToString());
         SetMeta(transaction, "gamedata.sourceTimestamp", sourceTimestamp.ToString());
         SetMeta(transaction, "gamedata.language", language);
         transaction.Commit();
