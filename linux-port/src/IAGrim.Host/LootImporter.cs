@@ -19,6 +19,7 @@ internal static class LootImporter {
         Func<AppSettings> settings,
         AutoAttachService? autoAttach,
         SteamPaths? paths,
+        GameDataRefresh? gameData,
         CancellationToken cancellationToken) {
 
         if (bridge is null) {
@@ -61,7 +62,8 @@ internal static class LootImporter {
 
                 if (paths is not null) {
                     var status = collection.Status(paths, bridge, startedAt, settings(),
-                                                   autoAttach?.State(settings().AutoAttach).Attaching ?? false);
+                                                   autoAttach?.State(settings().AutoAttach).Attaching ?? false,
+                                                   gameData?.Running ?? false, gameData?.Step);
                     // Records compare by value, so this is "has anything the user can see moved".
                     if (status != lastStatus) {
                         lastStatus = status;

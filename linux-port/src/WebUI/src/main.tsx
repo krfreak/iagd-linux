@@ -28,11 +28,27 @@ function StatusBar({ status }: { status: HostStatus | null }) {
 
   // A Grim Dawn patch, or a language change, invalidates every name, level and icon — and
   // nothing about that fails, so it has to be said out loud.
+  // Reading Grim Dawn's data. The client starts this itself — at startup when the game has
+  // been patched, and whenever the installation or language changes — so this is a progress
+  // report, not an instruction.
+  if (status.parsingGameData) {
+    return (
+      <div class="status status--warn">
+        <span class="dot dot--warn" /> Reading Grim Dawn's data…
+        <span class="status__detail">{status.parseStep ?? 'this takes a moment'}</span>
+      </div>
+    );
+  }
+
   if (status.gameDataStale) {
     return (
       <div class="status status--warn">
         <span class="dot dot--warn" /> {status.gameDataStale}
-        <span class="status__detail">run <code>iagd parse</code></span>
+        <span class="status__detail">
+          {status.gameDir
+            ? 'reading it now — the Grim Dawn tab can start it again'
+            : 'Grim Dawn was not found — set the game folder in Settings'}
+        </span>
       </div>
     );
   }
@@ -1291,9 +1307,26 @@ function App() {
           <div class="tabpage">
             <h2>Grim Dawn Database</h2>
             <p>
-              Item names, icons and levels are read from the game's own archives by
-              <code>iagd parse</code>, then rolled per item by <code>iagd stats</code>.
+              Item names, icons and levels come from the game's own archives. The client reads
+              them when it starts if the game has been patched, and whenever you point it at a
+              different installation — there is nothing to run by hand.
             </p>
+
+            <div class="settings__row">
+              <button
+                class="button button--primary"
+                disabled={!status?.gameDir || status?.parsingGameData}
+                onClick={() => api.parse().then((r) => setToast(
+                  r.error ?? `Reading Grim Dawn's data from ${r.gameDir}…`))}
+              >
+                {status?.parsingGameData ? 'Reading…' : 'Load Database'}
+              </button>
+              <em>
+                {status?.parsingGameData
+                  ? (status.parseStep ?? 'working')
+                  : 'reads item names, icons and skills, then analyses the collection'}
+              </em>
+            </div>
             <dl class="tabpage__facts">
               <dt>Installation</dt><dd>{status?.gameDir ?? 'not found'}</dd>
               <dt>Templates parsed</dt><dd>{status?.templateCount?.toLocaleString() ?? '0'}</dd>

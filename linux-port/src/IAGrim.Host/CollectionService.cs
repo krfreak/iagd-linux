@@ -441,7 +441,8 @@ public sealed class CollectionService {
     }
 
     public HostStatus Status(SteamPaths paths, PrefixBridge bridge, DateTime? gameStartedAt,
-                             AppSettings? settings = null, bool attaching = false) {
+                             AppSettings? settings = null, bool attaching = false,
+                             bool parsing = false, string? parseStep = null) {
         using var connection = Open();
 
         int Count(string table) {
@@ -507,6 +508,8 @@ public sealed class CollectionService {
             DatabaseFile:     _databasePath,
             ItemsNeedingStats: NeedingStats(),
             GameDataStale:    Staleness(paths, settings),
-            Attaching:        attaching);
+            Attaching:        attaching,
+            ParsingGameData:  parsing,
+            ParseStep:        parseStep);
     }
 }

@@ -202,124 +202,23 @@ internal static class Program {
             return 1;
         }
 
-        // Re-parsing clears the game stat rows and reassigns every record id. That is derived
-        // data and rebuildable, but the same file holds the collection, which is not — so there
-        // is a copy to go back to before anything is deleted.
-        try {
-            DatabaseBackup.Create(LinuxPaths.DatabaseFile, LinuxPaths.BackupDir, "before-parse");
-        }
-        catch (Exception ex) {
-            Console.WriteLine($"warning: could not back up before parsing: {ex.Message}");
-        }
-
-        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-
-        var available = ItemDatabase.FindLanguages(gameDir);
-        var language = settings.Language;
-        if (!available.Contains(language, StringComparer.OrdinalIgnoreCase)) {
-            Console.WriteLine($"warning: no Text_{language}.arc in this installation; using English.");
-            Console.WriteLine($"         available: {string.Join(", ", available)}");
-            language = "EN";
-        }
-
-        var archives = ItemDatabase.FindTextArchives(gameDir, language);
-        Console.WriteLine($"Reading {archives.Count} text archive(s) ({language})...");
-        var tags = ItemDatabase.LoadTags(archives);
-        Console.WriteLine($"  {tags.Count:N0} tags");
-
-        var databases = ItemDatabase.FindDatabases(gameDir);
-        Console.WriteLine($"Reading {databases.Count} item database(s)...");
-
-        // Later archives override earlier ones: that is how expansions retitle and rebalance
-        // base-game items.
-        var templates = new Dictionary<string, ItemTemplate>(StringComparer.OrdinalIgnoreCase);
-        foreach (var database in databases) {
-            var before = templates.Count;
-            foreach (var template in ItemDatabase.LoadTemplates(database, tags)) {
-                templates[template.Record] = template;
-            }
-            Console.WriteLine($"  {Path.GetFileName(database),-16} {templates.Count - before,7:N0} new");
-        }
-
-        using var store = new GameDataStore(LinuxPaths.DatabaseFile);
-        var written = store.ReplaceTemplates(templates.Values);
-        store.ReplaceTags(tags);
-
-        // Mods layer over the base game: each ships only the records it adds or changes, so its
-        // templates are stored under its own name and looked up mod-first with a vanilla
-        // fallback. Items looted in a mod carry that name from the hook already.
-        var mods = ItemDatabase.FindMods(gameDir);
-        foreach (var (name, dir) in mods) {
-            var modDatabases = ItemDatabase.FindModDatabases(dir);
-            var modTemplates = new Dictionary<string, ItemTemplate>(StringComparer.OrdinalIgnoreCase);
-            foreach (var database in modDatabases) {
-                foreach (var template in ItemDatabase.LoadTemplates(database, tags)) {
-                    modTemplates[template.Record] = template;
-                }
-            }
-
-            var modWritten = store.ReplaceTemplates(modTemplates.Values, name);
-            Console.WriteLine($"  mod {name,-24} {modWritten,7:N0} records");
-        }
-
-        // A mod removed since the last parse would otherwise keep winning the mod-first lookup
-        // for items still tagged with it, naming them from a mod the player no longer has.
-        // What this parse was made from, so a later run can tell whether it is still current.
-        store.RecordParseSource(ItemDatabase.GetHighestTimestamp(gameDir), language);
-
-        var dropped = store.RemoveTemplatesForMissingMods(mods.Select(m => m.Name));
-        if (dropped > 0) {
-            Console.WriteLine($"  dropped templates for {dropped} uninstalled mod(s)");
-        }
-
-        // Which items grant which skills. A separate pass because it needs the *unfiltered*
-        // records, including skill records, which the template pass does not keep.
-        Console.WriteLine("Resolving granted skills...");
-        var parsedSkills = SkillParser.Parse(databases, tags, message => Console.WriteLine($"  {message}"));
-        var (skills, mappings) = store.ReplaceSkills(parsedSkills);
-        var summoners = parsedSkills.Skills.Count(s => s.SpawnsPets);
-        Console.WriteLine($"  {skills:N0} skills, {mappings:N0} item mappings ({summoners:N0} summon pets)");
-
-        // Icons come from the ARC archives rather than the item database. Extracting them
-        // here keeps game data a single step, and the filenames are what ItemTemplate.IconFile
-        // already points at.
-        Console.WriteLine("Extracting item icons...");
-        var iconsBefore = Directory.GetFiles(LinuxPaths.IconDir, "*.png").Length;
-        foreach (var arc in FindItemArchives(gameDir)) {
-            try {
-                DdsIconExtractor.ExtractItemIcons(arc, LinuxPaths.IconDir);
-            }
-            catch (Exception ex) {
-                Console.WriteLine($"  warning: {Path.GetFileName(arc)}: {ex.Message}");
-            }
-        }
-        var icons = Directory.GetFiles(LinuxPaths.IconDir, "*.png").Length;
-        Console.WriteLine($"  {icons:N0} icons ({icons - iconsBefore:N0} new) in {LinuxPaths.IconDir}");
-
-        stopwatch.Stop();
-        var named = templates.Values.Count(t => t.Name is not null);
-        Console.WriteLine();
-        Console.WriteLine($"{written:N0} templates stored ({named:N0} named)"
-                          + $"{(mods.Count > 0 ? $" plus {mods.Count} mod(s)" : "")}"
-                          + $" in {stopwatch.Elapsed.TotalSeconds:F1}s.");
-        Console.WriteLine("Records without a name are mostly loot tables and components, not items.");
+        // The work itself lives in IAGrim.Core so the client can do it without a terminal,
+        // which is how upstream has always worked. This prints what it would have printed.
+        GameDataParse.Run(gameDir, LinuxPaths.DatabaseFile, LinuxPaths.BackupDir,
+                          settings.Language, Console.WriteLine);
 
         // Re-parsing reassigns every id_databaseitem, so the game stat rows keyed by them were
-        // dropped. Until 'iagd stats' rebuilds them, the record-driven filters (damage type,
-        // pet bonus, mastery, retaliation) match nothing — silently, which is the problem.
+        // dropped. Until the analysis pass rebuilds them, the record-driven filters (damage
+        // type, pet bonus, mastery, retaliation) match nothing — silently, which is the problem.
         using (var store2 = new LootStore(LinuxPaths.DatabaseFile)) {
             if (store2.CountItems() > 0) {
                 Console.WriteLine();
                 Console.WriteLine("Now run:  iagd stats     (re-parsing cleared the computed stats)");
+                Console.WriteLine("The client does this by itself when it starts.");
             }
         }
         return 0;
     }
-
-    /// <summary>
-    /// Rolls each collected item's real stat values from its seed, so the collection can be
-    /// filtered numerically rather than by text, and fills in the rarity, affix quality and
-    /// level requirement the rarity and level filters read.
     /// </summary>
     private static int Stats() {
         var (paths, _) = Resolve();
@@ -350,33 +249,6 @@ internal static class Program {
     /// Items.arc per expansion. Extraction skips anything already present, so re-running is
     /// cheap.
     /// </summary>
-    /// <summary>
-    /// The archives icons are extracted from: Items.arc per expansion, and **Level Art.arc**
-    /// with it.
-    ///
-    /// The second one is not an oversight of the game's: a handful of items are world objects
-    /// the player can pick up, so their textures live with the level art rather than with the
-    /// item icons. Lokarr's set is the visible case — four pieces that had no picture in the
-    /// list until this was added. Upstream reads both, for the base game and every expansion
-    /// (ArzParser: LoadIconsOrWarn(items.arc), LoadIconsOrWarn("Level Art.arc")).
-    ///
-    /// It costs little despite Level Art.arc being gigabytes: the extractor skips anything over
-    /// 45 KB, so almost nothing in there qualifies. Measured on this installation, the four
-    /// level-art archives add about six seconds and seven icons.
-    /// </summary>
-    private static IEnumerable<string> FindItemArchives(string gameDir) {
-        string[] expansions = ["", "gdx1", "gdx2", "gdx3"];
-
-        foreach (var expansion in expansions) {
-            foreach (var archive in new[] { "Items.arc", "Level Art.arc" }) {
-                var path = expansion.Length == 0
-                    ? Path.Combine(gameDir, "resources", archive)
-                    : Path.Combine(gameDir, expansion, "resources", archive);
-                if (File.Exists(path)) yield return path;
-            }
-        }
-    }
-
     private static int List(string[] args) {
         using var gameData = new GameDataStore(LinuxPaths.DatabaseFile);
         var rows = gameData.Collection(ArgValue(args, "--name")).ToList();

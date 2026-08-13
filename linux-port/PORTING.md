@@ -798,6 +798,33 @@ The second regex takes *any* trailing bracketed group, not only a numeric range,
 is reproduced rather than corrected; the card shows the trigger separately anyway, from
 `itemskill_v2`.
 
+### Reading the game's data is the client's job
+
+Upstream has no command line. Its Grim Dawn tab lists the installations it has found, **Load
+Database** reads the selected one, and a parse also happens by itself at startup when the game
+has been patched or was never read. Everything after that — icons, names, skills, then the
+analysis pass — follows without anyone being told to do anything.
+
+This port had all of that in `iagd parse`, so the UI's contribution was a line of text telling
+the user to open a terminal. The parse now lives in `IAGrim.Core.GameData.GameDataParse`, which
+the CLI and the client both call, and the client runs it:
+
+- **at startup** when `GameDataStatus` reports the data stale — never parsed, game patched, or
+  the language changed;
+- **when the installation or the language changes**, since a setting that changes what the data
+  means has to be followed by reading it again;
+- **on demand**, from the Grim Dawn tab's Load Database button (`POST /api/parse`).
+
+One at a time, guarded by a semaphore, because a parse replaces every template and reassigns
+every record id. The analysis pass runs immediately after, since a parse clears the rolled values
+it depends on. Progress reaches the status line rather than a terminal.
+
+Verified on a collection with its templates deleted: the client noticed at startup, reported
+`scanning database.arz` while it worked, and finished with 29,587 templates, 908 skills, 4,546
+icons and nothing left needing analysis — no commands run. The button and a game-folder change
+both start the same work, and a second request while one is running is refused rather than
+queued.
+
 ### The analysis pass runs itself
 
 Upstream checks `RequiresStatUpdate` at startup and runs a parse when more than fifty items lack

@@ -62,7 +62,8 @@ public sealed class ApiRouter {
                     await Json_(context, new { error = "No Grim Dawn Proton prefix found. Launch the game through Steam once." }, 503);
                     return;
                 }
-                await Json_(context, _collection.Status(_paths, _bridge, GameClock.StartTime(), _server?.Settings, Attaching));
+                await Json_(context, _collection.Status(_paths, _bridge, GameClock.StartTime(), _server?.Settings, Attaching,
+                                                    _server?.GameData?.Running ?? false, _server?.GameData?.Step));
                 return;
 
             case ("GET", "/api/items"): {
@@ -209,7 +210,9 @@ public sealed class ApiRouter {
                         if (_paths is not null && _bridge is not null) {
                             await _events.BroadcastAsync(
                                 HostEvent.Status(_collection.Status(_paths, _bridge, GameClock.StartTime(),
-                                                                    _server?.Settings, Attaching)),
+                                                                    _server?.Settings, Attaching,
+                                                                    _server?.GameData?.Running ?? false,
+                                                                    _server?.GameData?.Step)),
                                 cancellationToken);
                         }
                     }
@@ -228,6 +231,22 @@ public sealed class ApiRouter {
                 catch (Exception ex) {
                     await Json_(context, new { error = ex.Message }, 500);
                 }
+                return;
+            }
+
+            // Upstream's "Load Database": read the game's data again on demand.
+            case ("POST", "/api/parse"): {
+                var parse = await ReadJsonAsync<ParseRequest>(context);
+                var settings = _server?.Settings ?? AppSettings.Load();
+                var directory = parse?.GameDir ?? settings.GameDir ?? _paths?.GameDir;
+
+                if (directory is null) {
+                    await Json_(context, new { error = "Grim Dawn was not found; set the game folder first." }, 400);
+                    return;
+                }
+
+                _ = _server?.GameData?.StartAsync(directory, settings.Language, cancellationToken);
+                await Json_(context, new { started = true, gameDir = directory });
                 return;
             }
 
@@ -388,7 +407,8 @@ public sealed class ApiRouter {
 
         if (_paths is not null && _bridge is not null) {
             await _events.BroadcastAsync(
-                HostEvent.Status(_collection.Status(_paths, _bridge, GameClock.StartTime(), _server?.Settings, Attaching)), cancellationToken);
+                HostEvent.Status(_collection.Status(_paths, _bridge, GameClock.StartTime(), _server?.Settings, Attaching,
+                                                    _server?.GameData?.Running ?? false, _server?.GameData?.Step)), cancellationToken);
         }
 
         // Commands travel over HTTP; this channel is push-only. Hold it open so the socket

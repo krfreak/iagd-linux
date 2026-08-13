@@ -77,6 +77,9 @@ public sealed class HostServer : IAsyncDisposable {
     /// Binds the port and starts serving. Throws if the port is taken, which the caller should
     /// treat as "an instance is already running" rather than as a crash.
     /// </summary>
+    /// <summary>Reads Grim Dawn's data when asked, and when it has gone stale.</summary>
+    public GameDataRefresh? GameData { get; private set; }
+
     public void Start() {
         var collection = new CollectionService(LinuxPaths.DatabaseFile);
         var views = new CollectionViewService(LinuxPaths.DatabaseFile);
@@ -86,14 +89,21 @@ public sealed class HostServer : IAsyncDisposable {
 
         _listener.Start();
         AutoAttach = Bridge is null ? null : new AutoAttachService(Bridge);
+        GameData = new GameDataRefresh(events);
+
         _importer = LootImporter.RunAsync(Bridge, collection, events, transfers,
                                           GameClock.StartTime, () => Settings, AutoAttach,
-                                          Paths, _shutdown.Token);
+                                          Paths, GameData, _shutdown.Token);
 
-        // Rarity, level requirements and the game's stat rows, when the collection is missing
-        // them. Upstream does the same check at startup rather than waiting to be asked.
-        _ = StatRefresh.RunIfNeededAsync(LinuxPaths.DatabaseFile,
-                                         Settings.GameDir ?? Paths?.GameDir, events, _shutdown.Token);
+        // Grim Dawn's own data first: a patched game, a changed language or a collection that
+        // was never parsed. Upstream makes the same check when it starts. The analysis pass
+        // follows it, so this covers both — and when nothing is stale it costs one timestamp
+        // comparison and does nothing.
+        var gameDir = Settings.GameDir ?? Paths?.GameDir;
+        _ = GameData.StartIfStaleAsync(gameDir, Settings.Language, _shutdown.Token)
+                    .ContinueWith(_ => StatRefresh.RunIfNeededAsync(LinuxPaths.DatabaseFile, gameDir,
+                                                                    events, _shutdown.Token),
+                                  TaskScheduler.Default);
         _requestLoop = RunAsync(api);
     }
 
@@ -130,8 +140,18 @@ public sealed class HostServer : IAsyncDisposable {
     /// without pushing them there would appear to work and change nothing.
     /// </summary>
     public string? UpdateSettings(AppSettings settings) {
+        // Pointing the client at a different installation, or asking for another language, is
+        // upstream's "Load Database" — the data has to be read again for the change to mean
+        // anything. Doing it here is why the UI never has to send anyone to a terminal.
+        var reparse = !string.Equals(settings.GameDir, Settings.GameDir, StringComparison.Ordinal)
+                   || !string.Equals(settings.Language, Settings.Language, StringComparison.OrdinalIgnoreCase);
+
         settings.Save();
         Settings = settings;
+
+        if (reparse && (settings.GameDir ?? Paths?.GameDir) is { } dir) {
+            _ = GameData?.StartAsync(dir, settings.Language, _shutdown.Token);
+        }
 
         if (Bridge is null) return null;
         return BridgeSettings.Apply(Bridge, settings).Error;

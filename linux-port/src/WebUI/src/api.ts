@@ -65,6 +65,10 @@ export interface HostStatus {
   itemsNeedingStats: number;
   /** Why the parsed game data is out of date, or null when current. */
   gameDataStale: string | null;
+  /** True while Grim Dawn's data is being read. */
+  parsingGameData: boolean;
+  /** What that parse is doing, for the status line. */
+  parseStep: string | null;
   /** True while the host is attaching the hook to the running game. */
   attaching: boolean;
 }
@@ -376,6 +380,14 @@ export const api = {
     params.set('take', String(take));
     return fetch(`/api/items?${params}`).then(json<ItemPage>);
   },
+
+  /** Upstream's "Load Database": read Grim Dawn's data again. */
+  parse: (gameDir?: string) =>
+    fetch('/api/parse', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ gameDir }),
+    }).then(json<{ started?: boolean; gameDir?: string; error?: string }>),
 
   /** Every legendary and epic the game defines, against what is owned. */
   collection: (filters: ItemFilters) =>

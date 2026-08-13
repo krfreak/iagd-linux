@@ -68,6 +68,11 @@ public sealed record HostStatus(
     string? GameDir,
     string BridgeDir,
     string DatabaseFile,
+    /// <summary>True while Grim Dawn's data is being read.</summary>
+    bool ParsingGameData,
+    /// <summary>What that parse is doing, for the status line.</summary>
+    string? ParseStep,
+
     /// <summary>
     /// Items with no rarity yet, i.e. never seen by the precompute pass. Surfaced because the
     /// rarity and level filters read columns that pass fills in: without it, those filters
@@ -89,6 +94,9 @@ public sealed record HostStatus(
 /// stash picker shown only when that setting is enabled.
 /// </param>
 /// <param name="TargetHardcore">Send to the hardcore or softcore branch, as above.</param>
+/// <param name="GameDir">Which installation to read, or null for the configured one.</param>
+public sealed record ParseRequest(string? GameDir = null);
+
 /// <param name="DryRun">Report what would happen without writing anything.</param>
 public sealed record MergeRequest(string? Path = null, bool DryRun = true);
 
