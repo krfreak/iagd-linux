@@ -95,7 +95,7 @@ WIN_LOG="$(to_windows_path "$LOG_FILE")"
 cat <<EOF
 Attach IA hook to a running Grim Dawn
 ─────────────────────────────────────────────────────────────────────────────
-  Window    $WINDOW_NAME
+  Window    $WINDOW_NAME  (class), owned by $PROCESS_NAME
   Prefix    $COMPAT_DATA
   Proton    $PROTON
   DLL       $DLL
@@ -108,8 +108,11 @@ Attach IA hook to a running Grim Dawn
 
 EOF
 
+# Both: the window says *when* the game is ready, the image name says *which* process that
+# window belongs to. Inside the prefix Steam runs too, and its windows carry the game's name.
 CMD=("$PROTON" run "$WIN_INJECTOR" "$WIN_DLL"
      --attach-window "$WINDOW_NAME"
+     --attach-name "$PROCESS_NAME"
      --attach-retry "$RETRY_MS"
      --attach-timeout "$ATTACH_TIMEOUT_MS"
      --log-file "$WIN_LOG" "$@")

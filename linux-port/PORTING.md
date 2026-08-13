@@ -738,9 +738,19 @@ twenty-six attempts in one launch, observed. The game does not enjoy that.
 
 Three changes, all of them upstream's behaviour:
 
-- `--attach-window` in the injector patch: `FindWindowExW` by class, then by title as a
-  fallback, then `GetWindowThreadProcessId` — the same call pair upstream uses. No window means
-  no injection attempt at all, reported as `NOT READY` rather than as a failure.
+- `--attach-window` in the injector patch: `FindWindowExW` **by class**, then
+  `GetWindowThreadProcessId` — the same call pair upstream uses, and the third argument of
+  `FindWindowEx` is `lpszClass`, so class is what upstream matches. No window means no injection
+  attempt at all, reported as `NOT READY` rather than as a failure.
+
+  An earlier version of this also fell back to matching the window *title*, reasoning that a
+  game whose class changed would still be found. That was a bad trade and it cost a crash:
+  Steam runs inside the same prefix and its windows are titled after the game being launched, so
+  during startup the fallback could resolve to Steam's process and the injector would push a hook
+  meant for Grim Dawn into it, mid-launch. The class match is now the only one, and the owner is
+  confirmed against the expected image name (`--attach-name` alongside `--attach-window`) so a
+  matching window belonging to anything else is ignored. Verified in the prefix: a title-only
+  match is refused, and a class match whose owner is the wrong process is logged and skipped.
 - **One injection per invocation.** `HookAttacher` now sets `RETRY_MS=0`, so the cadence is
   `AutoAttachService`'s and not a loop inside the injector. Upstream injects at most once per
   pass for the same reason.
