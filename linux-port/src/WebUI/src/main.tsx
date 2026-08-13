@@ -115,6 +115,38 @@ function StatusBar({ status }: { status: HostStatus | null }) {
  * name, rarity and level with the body left empty until the game renders it once.
  */
 /**
+ * What the "Copy to clipboard" link puts on the clipboard.
+ *
+ * BBCode, one item per line, exactly as upstream builds it in
+ * `ItemContainer.getClipboardContent` — a coloured forum link per item, pointing at its search
+ * page. The point of the button is pasting a list of finds into a forum post, and plain names
+ * (which is what this port copied before) are not that.
+ *
+ * The colour names are upstream's map from its internal rarities, and quotation marks are
+ * stripped from the query for the same reason upstream strips them: they would terminate the
+ * BBCode attribute.
+ */
+const CLIPBOARD_COLOURS: Record<string, string> = {
+  Epic: 'DarkOrchid',
+  Blue: 'RoyalBlue',
+  Green: 'SeaGreen',
+  Yellow: 'Yellow',
+  Unknown: '',
+};
+
+function clipboardText(cards: ItemCardData[]): string {
+  return cards
+    .map((card) => {
+      const name = stripGrimText(card.item.name);
+      const colour = CLIPBOARD_COLOURS[card.item.rarity ?? 'Unknown'] ?? '';
+      const query = name.replace('"', '');
+      return `[URL="https://grimdawn.evilsoft.net/search/?query=${query}"]`
+           + `[COLOR="${colour}"]${name}[/COLOR][/URL]`;
+    })
+    .join('\n');
+}
+
+/**
  * Tooltip rows upstream does not draw: 3, 4, 5, 6, 64 and 77 are the name and slot lines its
  * header already shows, and 35 is "[Release Ctrl to Hide Details]", which is a prompt to the
  * player standing in front of the game rather than a property of the item.
@@ -1186,10 +1218,9 @@ function App() {
                   {view === 'items' && (
                     <button
                       class="webnav__clipboard"
-                      onClick={() => navigator.clipboard?.writeText(
-                        items.map((c) => stripGrimText(c.item.name)).join('\n'))}
+                      onClick={() => navigator.clipboard?.writeText(clipboardText(items))}
                     >
-                      Copy to Clipboard
+                      Copy to clipboard
                       <span>Displaying {items.length}/{total}</span>
                     </button>
                   )}

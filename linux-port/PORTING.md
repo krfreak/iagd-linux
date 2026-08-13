@@ -872,6 +872,22 @@ Verified against real records: a revolver and Lokarr's Gaze are kept, Gazer Man 
 another quest torso is refused, and components, potions, scrap, quest items, the salt bag and a
 stack of twelve are all turned away.
 
+### Copy to clipboard
+
+Upstream's, from `ItemContainer`: a link above the list that puts the visible items on the
+clipboard, with "Displaying n/total" beside it. What it copies is BBCode — one coloured forum
+link per item, pointing at that item's search page — because the point of the button is pasting
+a list of finds into a forum post.
+
+This port had the button and copied plain names, which is not the same feature. It now builds
+the same BBCode with upstream's own colour map (Epic → DarkOrchid, Blue → RoyalBlue, Green →
+SeaGreen, Yellow → Yellow) and strips quotation marks from the query for the reason upstream
+does: they would end the attribute.
+
+Upstream also appends "+" to the total when the count is still approximate. This port always
+knows the exact number — its search counts groups in the same query — so there is nothing to
+append.
+
 ### Links this port does not carry
 
 Upstream's nav has Discord and Patreon links. They are deliberately absent here and should stay
