@@ -674,6 +674,28 @@ body {
 .check input { accent-color: var(--accent); margin: 0; }
 .check:hover { color: var(--accent); }
 
+/* A checked stat, with the numeric comparison upstream hangs off its funnel button. */
+.check-row { display: flex; align-items: center; gap: 6px; }
+.check-row .check { flex: 1; min-width: 0; }
+.check-row .check span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.check-row__filter { display: flex; align-items: center; gap: 2px; }
+
+.check-row__filter select,
+.check-row__filter input {
+  background: var(--surface-sunken, var(--surface));
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-size: 11px;
+  padding: 1px 2px;
+}
+
+.check-row__filter select { cursor: pointer; }
+/* Wide enough for a four-digit resistance, narrow enough to leave the label room. */
+.check-row__filter input { width: 44px; text-align: right; }
+.check-row__filter input::placeholder { color: var(--text-dim); }
+
 /* --- the toolbar above the list ------------------------------------------ */
 .toolbar {
   display: flex;

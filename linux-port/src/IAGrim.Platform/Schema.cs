@@ -186,6 +186,7 @@ public static class Schema {
         }
 
         MigrateFromPortSchema(connection);
+        NormaliseToUpstreamValues(connection);
         RemoveOrphanedRows(connection);
 
         // Captured tooltips stored before this port normalised them the way upstream does.
@@ -207,6 +208,44 @@ public static class Schema {
         Execute(connection, "DROP TABLE ItemTemplate;");
         Execute(connection, PortTables.First(t => t.Table == "ItemTemplate").Ddl);
         foreach (var index in PortIndices) TryExecute(connection, index);
+    }
+
+    /// <summary>
+    /// Rewrites values this port once stored in a shape upstream does not use.
+    ///
+    /// Having upstream's *columns* is not the same as having upstream's *values*, and its SQL
+    /// depends on the values:
+    ///
+    ///   * optional records are the empty string there, never NULL — its stash parser starts
+    ///     them at "" and copies them through. The Components filter ends in
+    ///     <c>MateriaRecord = ''</c>, and NULL fails that test, so a collection written with
+    ///     NULLs returns no components at all.
+    ///   * <c>created_at</c> is milliseconds there — every write goes through
+    ///     <c>DateTime.ToTimestamp()</c>, which returns TotalMilliseconds. Seconds read as
+    ///     January 1970 in the Windows tool and sit inside every "recent" window.
+    ///
+    /// Both conversions are decided per row and are their own no-op the second time, so this can
+    /// run on every start: a collection merged in from elsewhere is fixed the same way.
+    /// </summary>
+    private static void NormaliseToUpstreamValues(SqliteConnection connection) {
+        if (!TableExists(connection, "PlayerItem")) return;
+
+        string[] recordColumns = [
+            "PrefixRecord", "SuffixRecord", "ModifierRecord", "MateriaRecord",
+            "RelicCompletionBonusRecord", "EnchantmentRecord", "TransmuteRecord",
+            "AscendantAffixNameRecord", "AscendantAffix2hNameRecord",
+        ];
+
+        foreach (var column in recordColumns) {
+            if (!ColumnExists(connection, "PlayerItem", column)) continue;
+            TryExecute(connection, $"UPDATE PlayerItem SET {column} = '' WHERE {column} IS NULL;");
+        }
+
+        // 1e11 ms is March 1973 and 1e11 s is the year 5138: no real timestamp is near the
+        // boundary, so which unit a row is in can be read off its magnitude.
+        TryExecute(connection,
+            "UPDATE PlayerItem SET created_at = created_at * 1000 "
+            + "WHERE created_at > 0 AND created_at < 100000000000;");
     }
 
     /// <summary>

@@ -84,6 +84,21 @@ public static class StatRefresh {
                 return "the game's stat rows were cleared by a re-parse";
             }
 
+            // The rows are there but were written by an older version of the pass, which did not
+            // write everything the filters now read. Nothing else notices this: the collection
+            // has rarities, names and colours, and only the affected filter comes back empty.
+            string? StoredVersion() {
+                using var command = connection.CreateCommand();
+                command.CommandText = "SELECT Value FROM GameDataMeta WHERE Key = $key;";
+                command.Parameters.AddWithValue("$key", StatPrecomputeService.VersionKey);
+                try { return command.ExecuteScalar() as string; }
+                catch (SqliteException) { return null; }
+            }
+
+            if (!int.TryParse(StoredVersion(), out var stored) || stored < StatPrecomputeService.Version) {
+                return "the game's stat rows predate the current analysis";
+            }
+
             if (Count("SELECT COUNT(*) FROM itemskill_v2;") == 0) {
                 return "no item skills have been read yet";
             }

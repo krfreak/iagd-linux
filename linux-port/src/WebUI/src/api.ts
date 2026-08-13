@@ -139,15 +139,26 @@ export interface ItemFilters {
   mastery?: string[];
   /** Stat-name groups: OR within a group, AND between groups. */
   has?: string[][];
+  /**
+   * Numeric comparisons on the summed value of a stat group, as "fieldA+fieldB>=30".
+   * Upstream attaches one of these to a checked stat checkbox through its funnel button, and
+   * offers >=, >, <=, < and =.
+   */
+  stat?: string[];
   hardcore?: boolean;
   /** Upstream's "Order By Level" checkbox: level first, then name. */
   orderByLevel?: boolean;
 }
 
-/** A mod the player has items from, or whose item database has been parsed. */
+/**
+ * One branch a search can be scoped to. Upstream's mod dropdown lists these and always has one
+ * selected: the game keeps a separate transfer stash per mod and per hardcore branch, and no
+ * item crosses between them.
+ */
 export interface ModInfo {
   /** Empty string is vanilla, matching PlayerItem.Mod. */
   name: string;
+  hardcore: boolean;
   items: number;
 }
 
@@ -233,6 +244,7 @@ function filterParams(filters: ItemFilters): URLSearchParams {
   for (const slot of filters.slot ?? []) params.append('slot', slot);
   for (const mastery of filters.mastery ?? []) params.append('mastery', mastery);
   for (const group of filters.has ?? []) params.append('has', group.join(','));
+  for (const comparison of filters.stat ?? []) params.append('stat', comparison);
 
   return params;
 }

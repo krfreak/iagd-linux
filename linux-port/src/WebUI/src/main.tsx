@@ -251,21 +251,72 @@ function FilterSidebar({ filters, onChange, catalogue }: {
   const key = (fields: string[]) => fields.join(',');
   const activeGroups = new Set((filters.has ?? []).map(key));
 
+  // A numeric comparison is stored as "fieldA+fieldB>=30", which is what the host parses. The
+  // fields identify which checkbox it belongs to, so a group carries at most one.
+  const fieldsOf = (comparison: string) => comparison.split(/[<>=]/, 1)[0];
+
+  const comparisonFor = (fields: string[]) =>
+    (filters.stat ?? []).find((s) => fieldsOf(s) === fields.join('+'));
+
+  const setComparison = (fields: string[], operator: string, value: string) => {
+    const rest = (filters.stat ?? []).filter((s) => fieldsOf(s) !== fields.join('+'));
+    const next = value.trim() === ''
+      ? rest
+      : [...rest, `${fields.join('+')}${operator}${value.trim()}`];
+    patch({ stat: next.length ? next : undefined });
+  };
+
   const statBox = (group: FilterGroup) => {
     const on = activeGroups.has(key(group.fields));
+    const comparison = comparisonFor(group.fields);
+    const operator = comparison?.match(/>=|<=|>|<|=/)?.[0] ?? '>=';
+    const threshold = comparison ? comparison.slice(fieldsOf(comparison).length + operator.length) : '';
+
     return (
-      <label key={group.label} class="check" title={group.fields.join(', ')}>
-        <input
-          type="checkbox"
-          checked={on}
-          onChange={(e) => {
-            const checked = (e.target as HTMLInputElement).checked;
-            const rest = (filters.has ?? []).filter((g) => key(g) !== key(group.fields));
-            patch({ has: checked ? [...rest, group.fields] : rest.length ? rest : undefined });
-          }}
-        />
-        <span>{group.label}</span>
-      </label>
+      <div key={group.label} class="check-row">
+        <label class="check" title={group.fields.join(', ')}>
+          <input
+            type="checkbox"
+            checked={on}
+            onChange={(e) => {
+              const checked = (e.target as HTMLInputElement).checked;
+              const rest = (filters.has ?? []).filter((g) => key(g) !== key(group.fields));
+              patch({ has: checked ? [...rest, group.fields] : rest.length ? rest : undefined });
+              // Upstream's numeric filter lives on the checkbox and goes with it.
+              if (!checked) setComparison(group.fields, operator, '');
+            }}
+          />
+          <span>{group.label}</span>
+        </label>
+
+        {/*
+          Upstream puts a funnel button on a checked stat checkbox, opening a dialog that asks
+          for a comparison and a number; the same two answers are asked for inline here. The
+          value compared is the item's own rolled total for these fields, summed.
+        */}
+        {on && (
+          <span class="check-row__filter">
+            <select
+              value={operator}
+              title="Match items where this stat is:"
+              onChange={(e) => setComparison(group.fields, (e.target as HTMLSelectElement).value, threshold)}
+            >
+              <option value=">=">&ge;</option>
+              <option value=">">&gt;</option>
+              <option value="<=">&le;</option>
+              <option value="<">&lt;</option>
+              <option value="=">=</option>
+            </select>
+            <input
+              type="text"
+              inputMode="decimal"
+              placeholder="any"
+              value={threshold}
+              onInput={(e) => setComparison(group.fields, operator, (e.target as HTMLInputElement).value)}
+            />
+          </span>
+        )}
+      </div>
     );
   };
 
@@ -331,6 +382,13 @@ function FilterSidebar({ filters, onChange, catalogue }: {
     </aside>
   );
 }
+
+/** The dropdown value for the branch a set of filters is scoped to. */
+const branchKey = (filters: ItemFilters) => `${filters.hardcore ? 'hc' : 'sc'}:${filters.mod ?? ''}`;
+
+/** "No mod", "No mod (hardcore)", "Grimarillion" — upstream names vanilla "No mod". */
+const branchLabel = (branch: ModInfo) =>
+  `${branch.name || 'No mod'}${branch.hardcore ? ' (hardcore)' : ''}`;
 
 /**
  * The row above the item list: search, ordering, the two dropdowns and the level range.
@@ -402,15 +460,24 @@ function Toolbar({ filters, onChange, catalogue, mods, query, onQuery, searchRef
         ))}
       </select>
 
+      {/*
+        The branch: one mod and one hardcore/softcore side, never both. Upstream's dropdown
+        works the same way and is never empty, because the game gives each combination its own
+        transfer stash and an item cannot move between them.
+      */}
       <select
         class="toolbar__select"
-        value={filters.mod ?? ''}
-        onChange={(e) => patch({ mod: (e.target as HTMLSelectElement).value })}
-        title="Items are partitioned by mod; each has its own stash in game"
+        value={branchKey(filters)}
+        onChange={(e) => {
+          const [hardcore, ...rest] = (e.target as HTMLSelectElement).value.split(':');
+          patch({ hardcore: hardcore === 'hc', mod: rest.join(':') });
+        }}
+        title="Items are partitioned by mod and by hardcore; each has its own stash in game"
       >
-        <option value="">No mod</option>
-        {mods.filter((m) => m.name).map((m) => (
-          <option key={m.name} value={m.name}>{m.name}</option>
+        {(mods.length ? mods : [{ name: '', hardcore: false, items: 0 }]).map((m) => (
+          <option key={`${m.hardcore}:${m.name}`} value={`${m.hardcore ? 'hc' : 'sc'}:${m.name}`}>
+            {branchLabel(m)}
+          </option>
         ))}
       </select>
 
@@ -966,12 +1033,17 @@ function ItemPanel({ id, transfer, onSend, onCancel, onClose, mods, allowRetarge
               }}
             >
               <option value="">Where it came from</option>
-              {(mods.length > 0 ? mods : [{ name: '', items: 0 }]).flatMap((m) => [
-                <option key={`sc:${m.name}`} value={`sc:${m.name}`}>
-                  Softcore · {m.name === '' ? 'Vanilla' : m.name}
+              {/*
+                Both branches of every mod, whether or not the collection holds items there: a
+                stash you have never used is still somewhere an item can be sent. The branch
+                list arrives already split by hardcore, so the mod names are taken from it.
+              */}
+              {[...new Set([...mods.map((m) => m.name), ''])].flatMap((name) => [
+                <option key={`sc:${name}`} value={`sc:${name}`}>
+                  Softcore · {name === '' ? 'Vanilla' : name}
                 </option>,
-                <option key={`hc:${m.name}`} value={`hc:${m.name}`}>
-                  Hardcore · {m.name === '' ? 'Vanilla' : m.name}
+                <option key={`hc:${name}`} value={`hc:${name}`}>
+                  Hardcore · {name === '' ? 'Vanilla' : name}
                 </option>,
               ])}
             </select>
@@ -1003,7 +1075,11 @@ function App() {
   const [query, setQuery] = useState('');
   const [tab, setTab] = useState<Tab>('items');
   const [view, setView] = useState<View>('items');
-  const [filters, setFilters] = useState<ItemFilters>({});
+  // Vanilla softcore until the branch list arrives, which is where the game puts everything an
+  // unmodded run loots. Upstream starts with a branch selected too; leaving it unset would
+  // search every mod and both branches at once, which upstream cannot do and the game does not
+  // mean — and the dropdown would then be showing a branch that was not being searched.
+  const [filters, setFilters] = useState<ItemFilters>({ mod: '', hardcore: false });
   const [catalogue, setCatalogue] = useState<FilterCatalogue | null>(null);
   const [mods, setMods] = useState<ModInfo[]>([]);
   // Choosing a target stash is gated on the same setting upstream gates its stash picker with.
@@ -1056,7 +1132,21 @@ function App() {
     api.status().then(setStatus).catch(() => {});
     // The filter definitions live on the host so there is one copy of them; fetched once.
     api.filters().then(setCatalogue).catch(() => {});
-    api.mods().then(setMods).catch(() => {});
+    api.mods()
+      .then((branches) => {
+        setMods(branches);
+        // A collection that holds nothing on the default branch would otherwise open empty with
+        // no hint that the items are one dropdown entry away. Upstream picks the first entry for
+        // the same reason (ModSelectionHandler.SetDefaultModIfAvailable).
+        setFilters((current) => {
+          const chosen = branchKey(current);
+          if (branches.length === 0 || branches.some((b) => `${b.hardcore ? 'hc' : 'sc'}:${b.name}` === chosen)) {
+            return current;
+          }
+          return { ...current, mod: branches[0].name, hardcore: branches[0].hardcore };
+        });
+      })
+      .catch(() => {});
     api.settings().then((s) => setAllowRetarget(s.transferAnyMod)).catch(() => {});
 
     return subscribe((event: HostEvent) => {
@@ -1378,8 +1468,8 @@ function App() {
               <thead><tr><th>Mod</th><th>Items</th></tr></thead>
               <tbody>
                 {mods.map((m) => (
-                  <tr key={m.name}>
-                    <td>{m.name || 'Vanilla'}</td>
+                  <tr key={`${m.hardcore}:${m.name}`}>
+                    <td>{m.name || 'Vanilla'}{m.hardcore ? ' (hardcore)' : ''}</td>
                     <td>{m.items.toLocaleString()}</td>
                   </tr>
                 ))}

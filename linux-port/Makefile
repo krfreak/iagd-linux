@@ -53,6 +53,7 @@ verify:
 	@bash ./scripts/verify-slot-filters.sh
 	@bash ./scripts/verify-item-admission.sh
 	@bash ./scripts/verify-schema.sh
+	@bash ./scripts/verify-search-filters.sh
 
 # A relocatable, self-contained package: AppDir + tarball, and an AppImage when appimagetool
 # is installed. See packaging/build-appimage.sh for why this is not a Flatpak.

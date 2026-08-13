@@ -52,6 +52,21 @@ public sealed class CollectionService {
     /// (2)" rather than two entries side by side — which is what stops a stash of forty identical
     /// components filling the window.
     /// </summary>
+    /// <summary>
+    /// The tables every search reads, and the aliases <see cref="ItemQueryBuilder"/>'s fragments
+    /// are written against.
+    ///
+    /// Internal rather than a local so that scripts/verify-search-filters.sh can run this port's
+    /// own WHERE clauses against a database and compare the matched items with what upstream's
+    /// SQL matches. A verification that built its own FROM would be checking a copy.
+    /// </summary>
+    internal const string SearchFrom = """
+        FROM PlayerItem p
+        LEFT JOIN ItemTemplate tm ON tm.Record = p.baserecord AND tm.Mod = IFNULL(p.Mod, '')
+        LEFT JOIN ItemTemplate tv ON tv.Record = p.baserecord AND tv.Mod = ''
+        LEFT OUTER JOIN ReplicaItem2 r ON p.Id = r.playeritemid
+        """;
+
     private const string MergeKey =
         "IFNULL(p.baserecord,'') || '|' || IFNULL(p.PrefixRecord,'') || '|' || IFNULL(p.SuffixRecord,'')";
 
@@ -73,12 +88,7 @@ public sealed class CollectionService {
         // the base game, so a modded item with a base-game record has no mod template and must
         // fall back. Two indexed joins beat a correlated subquery per row, and unlike a subquery
         // they stay readable next to upstream's SQL.
-        const string from = """
-            FROM PlayerItem p
-            LEFT JOIN ItemTemplate tm ON tm.Record = p.baserecord AND tm.Mod = IFNULL(p.Mod, '')
-            LEFT JOIN ItemTemplate tv ON tv.Record = p.baserecord AND tv.Mod = ''
-            LEFT OUTER JOIN ReplicaItem2 r ON p.Id = r.playeritemid
-            """;
+        const string from = SearchFrom;
 
         // Two totals, because they answer different questions. Paging walks *cards*, so the
         // scroll has to stop at the number of groups. What the window reports is *items*, which
@@ -419,36 +429,56 @@ public sealed class CollectionService {
     }
 
     /// <summary>
-    /// Mods that matter here: any the player owns items from, plus any whose templates have been
-    /// parsed. Both, because an installed-but-unplayed mod should be selectable, and a mod
-    /// uninstalled since should not hide the items still in the collection.
+    /// The branches a search can be scoped to: one entry per (mod, hardcore) pair the collection
+    /// holds.
     ///
-    /// Vanilla is the empty string, matching PlayerItem.Mod and upstream's convention.
+    /// Upstream's <c>PlayerItemDaoImpl.GetModSelection</c>, which fills the dropdown its search
+    /// is always scoped by — a search there is never "everything", because the game keeps a
+    /// separate transfer stash per mod and per hardcore branch, and an item cannot cross either.
+    /// Its two "even if we have no items, at least list vanilla/nomod" rules are kept.
+    ///
+    /// Vanilla is the empty string, matching PlayerItem.Mod and upstream's convention. Mods that
+    /// have been parsed but never played are listed too, so a fresh install can be pointed at
+    /// one; upstream has no equivalent only because it discovers mods a different way.
     /// </summary>
     public IReadOnlyList<object> Mods() {
         using var connection = Open();
         using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT Mod, SUM(Items) AS Items FROM (
-                SELECT IFNULL(Mod, '') AS Mod, COUNT(*) AS Items FROM PlayerItem GROUP BY IFNULL(Mod, '')
+            SELECT Mod, Hardcore, SUM(Items) AS Items FROM (
+                SELECT IFNULL(Mod, '') AS Mod, IsHardcore <> 0 AS Hardcore, COUNT(*) AS Items
+                  FROM PlayerItem GROUP BY IFNULL(Mod, ''), IsHardcore <> 0
                 UNION ALL
-                SELECT DISTINCT Mod, 0 FROM ItemTemplate
+                SELECT DISTINCT Mod, 0, 0 FROM ItemTemplate
             )
-            GROUP BY Mod
-            ORDER BY (Mod = '') DESC, Mod;
+            GROUP BY Mod, Hardcore
+            ORDER BY Hardcore, (Mod = '') DESC, Mod;
             """;
 
-        var mods = new List<object>();
+        var branches = new List<(string Mod, bool Hardcore, int Items)>();
         try {
             using var reader = command.ExecuteReader();
             while (reader.Read()) {
-                var name = reader.IsDBNull(0) ? "" : reader.GetString(0);
-                mods.Add(new { Name = name, Items = reader.GetInt32(1) });
+                branches.Add((reader.IsDBNull(0) ? "" : reader.GetString(0),
+                              reader.GetBoolean(1), reader.GetInt32(2)));
             }
         }
         catch (SqliteException) { /* not parsed yet */ }
 
-        return mods;
+        // Upstream's rule: if a branch has items from a mod, vanilla on that branch is offered
+        // too, since that is where the game puts anything looted without the mod loaded.
+        foreach (var hardcore in new[] { false, true }) {
+            if (branches.Any(b => b.Hardcore == hardcore)
+                && !branches.Any(b => b.Hardcore == hardcore && b.Mod.Length == 0)) {
+                branches.Add(("", hardcore, 0));
+            }
+        }
+
+        return branches
+            .OrderBy(b => b.Hardcore).ThenByDescending(b => b.Mod.Length == 0)
+            .ThenBy(b => b.Mod, StringComparer.OrdinalIgnoreCase)
+            .Select(b => (object)new { Name = b.Mod, Hardcore = b.Hardcore, Items = b.Items })
+            .ToList();
     }
 
     public HostStatus Status(SteamPaths paths, PrefixBridge bridge, DateTime? gameStartedAt,

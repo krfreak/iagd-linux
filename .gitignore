@@ -31,3 +31,7 @@ node_modules/
 
 # Throwaway probe projects the verify scripts build to read the port's own tables back.
 /linux-port/scripts/.*-probe/
+
+# Build output of the committed search-filter probe.
+/linux-port/scripts/search-probe/bin/
+/linux-port/scripts/search-probe/obj/

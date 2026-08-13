@@ -907,6 +907,73 @@ read off the skill itself, which is where the class skills that have one carry i
 decorates the line ("Tier 3 Occultist skill"); the class id, which is what the filter compares,
 is the same either way.
 
+### Verifying the filters against upstream's, rather than reading them
+
+The mastery filter had matched the wrong items for months, and the code looked right the whole
+time: it was written against upstream's source, it carried a comment explaining itself, and the
+comment was wrong. Reading a filter cannot catch that. Running it can.
+
+`scripts/verify-search-filters.sh` runs each filter twice over the same collection — once as
+upstream's SQL, once as this port's — and diffs the matched item ids. Neither side is written
+out in the script:
+
+* upstream's fragments are **pinned**. Every case names a line that must still exist in
+  `PlayerItemDaoImpl.cs`; when upstream rewords a clause the case reports itself stale instead of
+  quietly testing a fragment upstream no longer uses.
+* ours comes from the **running code**. `scripts/search-probe` reflects over `ItemQueryBuilder`
+  and `CollectionService.SearchFrom`, so the SQL under test is the SQL the client executes.
+
+The collection is the user's own, snapshotted with `VACUUM INTO` (`IAGD_VERIFY_DB` overrides it).
+Real data is the point: an empty database agrees on everything. The snapshot is put through
+`Schema.Apply` first, because that is what the client does to any database it opens, and two of
+the cases only mean anything afterwards.
+
+A filter that matches nothing on both sides is reported as **not exercised** rather than passing.
+Agreement on nothing is agreement, but it is not evidence, and a collection that never exercises
+a filter should not make it look verified. Two stay that way here: the hardcore branch and
+"recent" are arranged for by seeding one row each in the throwaway snapshot; Components cannot be
+exercised at all, because `ItemAdmission` refuses components, so no collection ever holds one.
+
+Four filters were wrong when the harness was first pointed at them, all four invisible to
+reading:
+
+| Filter | What happened | Why |
+| --- | --- | --- |
+| Recent only | matched **every** item | `created_at` is milliseconds upstream (`ToTimestamp` returns `TotalMilliseconds`); this port wrote and compared seconds, so every item sat inside the twelve-hour window |
+| Duplicates only | 5,376 items where upstream matched 600 | optional records are `''` upstream, never NULL, and `x \|\| NULL` is NULL — so every affixless item collapsed into one group |
+| Numeric stat filters | only `>=` existed | upstream's filter dialog offers `>=`, `>`, `<=`, `<` and `=`, and its DAO maps each to an SQL operator |
+| Every filter at once | counts that cannot match the Windows tool's | upstream scopes every search to one mod **and** one hardcore branch; this port scoped to neither by default |
+
+The first two were the same defect seen twice: having upstream's *columns* is not having
+upstream's *values*. `Schema.NormaliseToUpstreamValues` converts both on open, per row and
+idempotently, so a collection merged in from elsewhere is fixed the same way.
+
+### Branch scoping
+
+Upstream's search is always scoped to one mod and one hardcore branch, read from the selected
+transfer file (`SplitSearchWindow.UpdateListView`); its dropdown lists the `(mod, hardcore)` pairs
+the collection holds and is never empty. The game draws the same line — each combination has its
+own transfer stash and no item crosses between them.
+
+This port's dropdown offered mod names only, and started on "No mod" while actually searching
+every mod and both branches: the label and the query disagreed. `/api/items` now falls back to
+vanilla softcore, matching upstream's default, and the dropdown lists branches.
+
+The collection view is deliberately *not* scoped, because upstream's is not either —
+`ItemCollectionDaoImpl.GetItemCollection` counts softcore and hardcore copies side by side and
+never looks at the mod.
+
+### Derived rows have a version
+
+`DatabaseItemStat_v2` is not the game's data alone: several fields are synthesised by the
+analysis pass the way upstream's parser synthesises them, and the filters read what the pass
+wrote. So teaching the pass a new field leaves every collection analysed before then silently
+missing it — which is exactly what the mastery fix ran into. The database looked complete by
+every other measure (names, rarities, colours, icons) and the filter matched nothing.
+
+`StatPrecomputeService.Version` is stamped into `GameDataMeta` after each pass, and `StatRefresh`
+asks for a rebuild when what is stored is older. Raise it whenever the rows written there change.
+
 ### Two totals, and which one to show
 
 Identical items share a card, so a search has two sizes: the number of cards, which is what

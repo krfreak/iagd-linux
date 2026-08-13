@@ -35,6 +35,17 @@ public sealed class LootStore : IDisposable {
         return command.ExecuteScalar() is not null;
     }
 
+    /// <summary>
+    /// An item's optional record, in upstream's shape: the empty string, never NULL.
+    ///
+    /// Upstream's stash parser initialises every record field to "" and copies it through
+    /// unchanged (Parser/Stash/Item.cs, TransferStashService.Map), so its rows have no NULLs
+    /// here — and its SQL relies on that. The Components filter ends in
+    /// <c>MateriaRecord = ''</c>, which a NULL fails, so storing NULL made that filter match
+    /// nothing at all. <see cref="Schema"/> converts collections written before this.
+    /// </summary>
+    private static object Record(string? value) => value ?? "";
+
     public long Insert(LootedItem item) {
         using var transaction = _connection.BeginTransaction();
 
@@ -62,25 +73,28 @@ public sealed class LootStore : IDisposable {
             command.Parameters.AddWithValue("$mod", (object?)item.Mod ?? DBNull.Value);
             command.Parameters.AddWithValue("$hc", item.IsHardcore ? 1 : 0);
             command.Parameters.AddWithValue("$base", item.BaseRecord);
-            command.Parameters.AddWithValue("$prefix", (object?)item.PrefixRecord ?? DBNull.Value);
-            command.Parameters.AddWithValue("$suffix", (object?)item.SuffixRecord ?? DBNull.Value);
+            command.Parameters.AddWithValue("$prefix", Record(item.PrefixRecord));
+            command.Parameters.AddWithValue("$suffix", Record(item.SuffixRecord));
             command.Parameters.AddWithValue("$seed", item.Seed);
             command.Parameters.AddWithValue("$rerolls", item.RerollsUsed);
-            command.Parameters.AddWithValue("$modifier", (object?)item.ModifierRecord ?? DBNull.Value);
-            command.Parameters.AddWithValue("$materia", (object?)item.MateriaRecord ?? DBNull.Value);
-            command.Parameters.AddWithValue("$relicBonus", (object?)item.RelicCompletionBonusRecord ?? DBNull.Value);
+            command.Parameters.AddWithValue("$modifier", Record(item.ModifierRecord));
+            command.Parameters.AddWithValue("$materia", Record(item.MateriaRecord));
+            command.Parameters.AddWithValue("$relicBonus", Record(item.RelicCompletionBonusRecord));
             command.Parameters.AddWithValue("$relicSeed", item.RelicSeed);
-            command.Parameters.AddWithValue("$enchantment", (object?)item.EnchantmentRecord ?? DBNull.Value);
+            command.Parameters.AddWithValue("$enchantment", Record(item.EnchantmentRecord));
             command.Parameters.AddWithValue("$enchantmentSeed", item.EnchantmentSeed);
-            command.Parameters.AddWithValue("$transmute", (object?)item.TransmuteRecord ?? DBNull.Value);
-            command.Parameters.AddWithValue("$asc1", (object?)item.AscendantAffixNameRecord ?? DBNull.Value);
-            command.Parameters.AddWithValue("$asc2", (object?)item.AscendantAffix2hNameRecord ?? DBNull.Value);
+            command.Parameters.AddWithValue("$transmute", Record(item.TransmuteRecord));
+            command.Parameters.AddWithValue("$asc1", Record(item.AscendantAffixNameRecord));
+            command.Parameters.AddWithValue("$asc2", Record(item.AscendantAffix2hNameRecord));
             command.Parameters.AddWithValue("$affixRerolls", item.AffixRerollsUsed);
             command.Parameters.AddWithValue("$stack", Math.Max(1, item.StackCount));
             command.Parameters.AddWithValue("$name", (object?)item.PlainName ?? DBNull.Value);
             command.Parameters.AddWithValue("$nameLower",
                 (object?)item.PlainName?.ToLowerInvariant() ?? DBNull.Value);
-            command.Parameters.AddWithValue("$created", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
+            // Milliseconds: upstream's created_at is written by DateTime.ToTimestamp(), which
+            // returns TotalMilliseconds. Seconds here would read as 1970 in the Windows tool and
+            // would put every item inside the "recent" window.
+            command.Parameters.AddWithValue("$created", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
 
             id = (long)command.ExecuteScalar()!;
         }

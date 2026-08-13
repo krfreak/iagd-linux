@@ -67,12 +67,15 @@ public sealed class ApiRouter {
                 return;
 
             case ("GET", "/api/items"): {
-                await Json_(context, _collection.Search(ParseItemQuery(query),
+                await Json_(context, _collection.Search(Branch(ParseItemQuery(query)),
                                                         ParseInt(query["skip"], 0),
                                                         ParseInt(query["take"], 100)));
                 return;
             }
 
+            // Not branch-scoped, and upstream's is not either: its collection query counts
+            // softcore and hardcore copies of each item side by side and never looks at the mod
+            // (ItemCollectionDaoImpl.GetItemCollection).
             case ("GET", "/api/collection"):
                 await Json_(context, _views.Collection(ParseItemQuery(query)));
                 return;
@@ -543,6 +546,23 @@ public sealed class ApiRouter {
             },
         };
     }
+
+    /// <summary>
+    /// Scopes a search to one mod and one hardcore branch, which is the only kind of search
+    /// upstream can run.
+    ///
+    /// Its search window reads both from the selected transfer file and there is always one
+    /// selected (SplitSearchWindow.UpdateListView); a client that leaves them out is asking a
+    /// question upstream cannot ask, and gets an item count that does not match the Windows
+    /// tool's for the same collection. The game itself draws the same line: each mod and each
+    /// branch has its own transfer stash, and no item crosses between them.
+    ///
+    /// Vanilla softcore is the fallback because that is where an unmodded game puts everything.
+    /// </summary>
+    private static ItemQuery Branch(ItemQuery query) => query with {
+        Mod = query.Mod ?? "",
+        IsHardcore = query.IsHardcore ?? false,
+    };
 
     /// <summary>
     /// Search criteria from the query string. Shared by /api/items and /api/collection, which

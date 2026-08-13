@@ -102,29 +102,68 @@ public sealed record ItemQuery {
     public IReadOnlyList<StatValueFilter> StatFilters { get; init; } = [];
 }
 
+/// <summary>
+/// How a numeric stat filter compares. Upstream's <c>StatValueFilter.Op</c>, name for name — its
+/// filter dialog offers all five and its DAO maps each to an SQL operator.
+/// </summary>
+public enum StatFilterOp { GreaterThan, GreaterOrEqual, LessThan, LessOrEqual, Equal }
+
 /// <param name="Fields">Fields whose values are summed before comparing.</param>
-/// <param name="Minimum">Threshold the sum must reach.</param>
-public sealed record StatValueFilter(IReadOnlyList<string> Fields, double Minimum) {
+/// <param name="Operator">How the sum is compared with the threshold.</param>
+/// <param name="Threshold">The number the sum is compared against.</param>
+public sealed record StatValueFilter(
+    IReadOnlyList<string> Fields,
+    StatFilterOp Operator,
+    double Threshold) {
+
     /// <summary>
-    /// Parses "field>=value", or "fieldA+fieldB>=value" to sum several fields, which is how
-    /// upstream's damage checkboxes behave.
+    /// Upstream's <c>ToSqlOperator</c>. Kept as a table rather than the operator text so an
+    /// unparsed value cannot reach the SQL.
+    /// </summary>
+    public string SqlOperator => Operator switch {
+        StatFilterOp.GreaterThan    => ">",
+        StatFilterOp.GreaterOrEqual => ">=",
+        StatFilterOp.LessThan       => "<",
+        StatFilterOp.LessOrEqual    => "<=",
+        StatFilterOp.Equal          => "=",
+        _                           => ">=",   // upstream's default arm
+    };
+
+    /// <summary>
+    /// Longest first: "&gt;" is a prefix of "&gt;=", and testing it first would read the
+    /// threshold of "fire&gt;=30" as "=30".
+    /// </summary>
+    private static readonly (string Text, StatFilterOp Op)[] Operators = [
+        (">=", StatFilterOp.GreaterOrEqual),
+        ("<=", StatFilterOp.LessOrEqual),
+        (">",  StatFilterOp.GreaterThan),
+        ("<",  StatFilterOp.LessThan),
+        ("=",  StatFilterOp.Equal),
+    ];
+
+    /// <summary>
+    /// Parses "field&gt;=value" — or "fieldA+fieldB&lt;20" to sum several fields, which is how
+    /// upstream's damage checkboxes behave. All five of upstream's comparisons are accepted.
     /// </summary>
     public static StatValueFilter? Parse(string raw) {
-        var separator = raw.IndexOf(">=", StringComparison.Ordinal);
-        if (separator <= 0) return null;
+        foreach (var (text, op) in Operators) {
+            var separator = raw.IndexOf(text, StringComparison.Ordinal);
+            if (separator <= 0) continue;
 
-        var fields = raw[..separator]
-            .Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Where(f => f.All(c => char.IsLetterOrDigit(c) || c == '_'))   // column-safe
-            .ToArray();
+            var fields = raw[..separator]
+                .Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Where(f => f.All(c => char.IsLetterOrDigit(c) || c == '_'))   // column-safe
+                .ToArray();
 
-        if (fields.Length == 0) return null;
-        if (!double.TryParse(raw[(separator + 2)..].Trim(),
-                             System.Globalization.NumberStyles.Float,
-                             System.Globalization.CultureInfo.InvariantCulture, out var minimum)) {
-            return null;
+            if (fields.Length == 0) return null;
+            if (!double.TryParse(raw[(separator + text.Length)..].Trim(),
+                                 System.Globalization.NumberStyles.Float,
+                                 System.Globalization.CultureInfo.InvariantCulture, out var threshold)) {
+                return null;
+            }
+            return new StatValueFilter(fields, op, threshold);
         }
-        return new StatValueFilter(fields, minimum);
+        return null;
     }
 }
 
@@ -288,9 +327,12 @@ internal static class ItemQueryBuilder {
             parameters["maxlevel"] = query.MaximumLevel;
         }
 
+        // Milliseconds, because that is what upstream's created_at holds: every write goes
+        // through DateTime.ToTimestamp(), whose result is TotalMilliseconds. Comparing against a
+        // seconds-scale cutoff — which this did — leaves every item on the recent side of it.
         if (query.RecentOnly) {
             fragments.Add("p.created_at > :recent");
-            parameters["recent"] = DateTimeOffset.UtcNow.AddHours(-12).ToUnixTimeSeconds();
+            parameters["recent"] = DateTimeOffset.UtcNow.AddHours(-12).ToUnixTimeMilliseconds();
         }
 
         // Only items which grants new skills.
@@ -360,10 +402,10 @@ internal static class ItemQueryBuilder {
                         SELECT playeritemid FROM ComputedItemStat
                         WHERE stat IN ({fields})
                         GROUP BY playeritemid
-                        HAVING SUM(value) >= :{thresholdParam}
+                        HAVING SUM(value) {filter.SqlOperator} :{thresholdParam}
                     )
                     """);
-                parameters[thresholdParam] = filter.Minimum;
+                parameters[thresholdParam] = filter.Threshold;
                 filterIndex++;
             }
         }

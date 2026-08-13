@@ -160,9 +160,39 @@ public sealed class StatPrecomputeService {
             computed++;
         }
 
+        StampVersion(connection, transaction);
         transaction.Commit();
         return new PrecomputeResult(items.Count, computed, written, skipped,
                                     statsByRecord.Count, recordStats, petLinks);
+    }
+
+    /// <summary>
+    /// What this pass writes, as a number that changes when the pass does.
+    ///
+    /// The rows in DatabaseItemStat_v2 are not the game's data alone: several are synthesised
+    /// here the way upstream's parser synthesises them, and a filter reads what this pass wrote
+    /// rather than what the archives hold. So when this pass learns to write a field it did not
+    /// write before, every collection parsed before then is silently missing it — the mastery
+    /// filter matched nothing at all for exactly that reason, on a database that looked complete
+    /// by every other measure.
+    ///
+    /// Raise this whenever the rows written here change shape or content.
+    /// </summary>
+    public const int Version = 2;
+
+    /// <summary>Where that number is kept. Read by StatRefresh to decide on a rebuild.</summary>
+    public const string VersionKey = "stats.version";
+
+    private static void StampVersion(SqliteConnection connection, SqliteTransaction transaction) {
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText =
+            "INSERT INTO GameDataMeta (Key, Value) VALUES ($key, $value) "
+            + "ON CONFLICT(Key) DO UPDATE SET Value = excluded.Value;";
+        command.Parameters.AddWithValue("$key", VersionKey);
+        command.Parameters.AddWithValue("$value", Version.ToString());
+        try { command.ExecuteNonQuery(); }
+        catch (SqliteException) { /* pre-GameDataMeta database; the next start creates it */ }
     }
 
     /// <summary>Records of skills items grant, so the summoner filter has stat rows to test.</summary>
