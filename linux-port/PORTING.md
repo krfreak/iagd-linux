@@ -1004,6 +1004,31 @@ computed, so "the computed renderer has no colours" meant "the client has no col
 how the lines came out. There is nothing stored to check — a computed line is built per request —
 so rendering the collection is the only way to know it renders correctly.
 
+### Requirements are only shown when the game wrote them
+
+A captured tooltip carries "Required Player Level: 92" and "Required Physique: 805"; a computed
+one carries neither. That asymmetry is upstream's, not a gap here: `StatManager` has no
+requirement handling at all — no physique, cunning or spirit — and its `ProcessStats` throws
+`NotImplementedException` for the FOOTER and SKILL passes, so only HEADER, BODY and PET are ever
+rendered. Attribute requirements exist in a card only because Grim Dawn itself drew that line.
+
+What upstream shows for every item, captured or not, is one number in the corner:
+`Level Requirement: {n}`, or "Any" below level 2 (`Item.tsx`). Its source is
+`PlayerItem.MinimumLevel`, which is the `LevelRequirement` column — the highest requirement
+across every record the item is made of, filled in by the analysis pass.
+
+This port had been showing the **base record's** level from `ItemTemplate` instead. Mostly the
+same number, and wrong wherever an affix gates the item above its base: a Preserver Targe whose
+shield record has no requirement of its own but whose affixes need level 92 read
+"Level Requirement: Any". 466 items in this collection showed a level that disagreed with their
+own requirement, 210 of them claiming "Any".
+
+Worse than cosmetic, because the level *filter* reads `PlayerItem.LevelRequirement` — the correct
+column. An item could be excluded by "minimum level 90" while its own card said it needed none.
+Now both read the same column, and the 11 items still showing "Any" are the story-element pieces
+that genuinely have no requirement (Lokarr's set and the two Gazer Man torsos, which are also the
+allowlist in [ItemAdmission](src/IAGrim.Platform/ItemAdmission.cs)).
+
 ### Captured lines are coloured by a table that predates the current game
 
 The row types in a captured tooltip come from Grim Dawn itself (`GameTextLine::textClass`, which

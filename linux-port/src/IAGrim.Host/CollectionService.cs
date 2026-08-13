@@ -123,7 +123,7 @@ public sealed class CollectionService {
         // several. Copies carries the rest.
         command.CommandText = $"""
             SELECT MIN(p.Id), p.Name, p.baserecord, p.Seed, p.IsHardcore,
-                   COALESCE(tm.Name, tv.Name), COALESCE(tm.ItemClass, tv.ItemClass), COALESCE(tm.Quality, tv.Quality), COALESCE(tm.LevelRequirement, tv.LevelRequirement), COALESCE(tm.IconFile, tv.IconFile),
+                   COALESCE(tm.Name, tv.Name), COALESCE(tm.ItemClass, tv.ItemClass), COALESCE(tm.Quality, tv.Quality), p.LevelRequirement, COALESCE(tm.IconFile, tv.IconFile),
                    (SELECT rr.Text FROM ReplicaItemRow rr
                      WHERE rr.replicaitemid = r.Id AND rr.Type = 6
                      ORDER BY rr.Id LIMIT 1) AS RawName,
@@ -211,7 +211,7 @@ public sealed class CollectionService {
         using (var command = connection.CreateCommand()) {
             command.CommandText = """
                 SELECT p.Id, p.Name, p.baserecord, p.Seed, p.IsHardcore,
-                       COALESCE(tm.Name, tv.Name), COALESCE(tm.ItemClass, tv.ItemClass), COALESCE(tm.Quality, tv.Quality), COALESCE(tm.LevelRequirement, tv.LevelRequirement), COALESCE(tm.IconFile, tv.IconFile),
+                       COALESCE(tm.Name, tv.Name), COALESCE(tm.ItemClass, tv.ItemClass), COALESCE(tm.Quality, tv.Quality), p.LevelRequirement, COALESCE(tm.IconFile, tv.IconFile),
                        (SELECT rr.Text FROM ReplicaItemRow rr
                          WHERE rr.replicaitemid = r.Id AND rr.Type = 6
                          ORDER BY rr.Id LIMIT 1) AS RawName,
@@ -378,7 +378,12 @@ public sealed class CollectionService {
             IsHardcore: reader.GetInt64(4) != 0,
             ItemClass:  Text(6),
             Quality:    Text(7),
-            Level:      reader.IsDBNull(8) ? 0 : reader.GetInt32(8),
+            // The *item's* requirement, not its base record's. Upstream sends
+            // PlayerItem.MinimumLevel, which is LevelRequirement — the highest across every
+            // record the item is made of. A shield whose base record has no requirement of its
+            // own but whose affixes need level 92 read "Level Requirement: Any" while the level
+            // filter, which uses this same column, excluded it below 92.
+            Level:      reader.IsDBNull(8) ? 0 : (int)reader.GetDouble(8),
             Icon:       Text(9),
             Rarity:     Text(11),
             PrefixRarity: reader.IsDBNull(12) ? 0 : reader.GetInt32(12),
