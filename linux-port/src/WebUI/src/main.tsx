@@ -15,6 +15,31 @@ import './style.css';
 const PAGE_SIZE = 60;
 
 /**
+ * What the level boxes start at, and go back to.
+ *
+ * Upstream's are never empty: its designer sets "0" and "110", and ClearFilters puts them back
+ * (SplitSearchWindow). Both ends are meaningful — 0 means "no minimum", and 110 is above
+ * anything the game requires, so the pair reads as "everything" while showing the shape of what
+ * the boxes want.
+ */
+const DEFAULT_MIN_LEVEL = 0;
+const DEFAULT_MAX_LEVEL = 110;
+
+/**
+ * A level box's value. Empty while typing rather than snapping to a number, so a box can be
+ * cleared and retyped; the blur handler puts the default back if it was left that way.
+ */
+function levelFrom(raw: string): number | undefined {
+  const digits = raw.replace(/\D/g, '');
+  return digits === '' ? undefined : Number(digits);
+}
+
+/** Whether a level box is at its default, i.e. not narrowing anything. */
+const isDefaultLevels = (filters: ItemFilters) =>
+  (filters.minLevel ?? DEFAULT_MIN_LEVEL) === DEFAULT_MIN_LEVEL
+  && (filters.maxLevel ?? DEFAULT_MAX_LEVEL) === DEFAULT_MAX_LEVEL;
+
+/**
  * The window's own tabs, which upstream draws in WinForms around its embedded browser.
  *
  * "Grim Dawn" is upstream's name for the tab holding the game installation and its mod
@@ -549,19 +574,31 @@ function Toolbar({ filters, onChange, catalogue, mods, query, onQuery, searchRef
         ))}
       </select>
 
+      {/*
+        Upstream's level boxes are never empty: they start at 0 and 110 and go back to those
+        when its filters are cleared (SplitSearchWindow's designer and ClearFilters). Three
+        digits, digits only, and an unparseable box falls back to the default when it loses
+        focus — all upstream's, including that 0 means "no minimum" rather than level zero.
+      */}
       <fieldset class="toolbar__level">
         <legend>Level</legend>
         <input
           type="text"
           inputMode="numeric"
+          maxLength={3}
           value={filters.minLevel ?? ''}
-          onInput={(e) => patch({ minLevel: Number((e.target as HTMLInputElement).value) || undefined })}
+          onInput={(e) => patch({ minLevel: levelFrom((e.target as HTMLInputElement).value) })}
+          onBlur={(e) => levelFrom((e.target as HTMLInputElement).value) === undefined
+                         && patch({ minLevel: DEFAULT_MIN_LEVEL })}
         />
         <input
           type="text"
           inputMode="numeric"
+          maxLength={3}
           value={filters.maxLevel ?? ''}
-          onInput={(e) => patch({ maxLevel: Number((e.target as HTMLInputElement).value) || undefined })}
+          onInput={(e) => patch({ maxLevel: levelFrom((e.target as HTMLInputElement).value) })}
+          onBlur={(e) => levelFrom((e.target as HTMLInputElement).value) === undefined
+                         && patch({ maxLevel: DEFAULT_MAX_LEVEL })}
         />
       </fieldset>
     </div>
@@ -1147,7 +1184,10 @@ function App() {
   // unmodded run loots. Upstream starts with a branch selected too; leaving it unset would
   // search every mod and both branches at once, which upstream cannot do and the game does not
   // mean — and the dropdown would then be showing a branch that was not being searched.
-  const [filters, setFilters] = useState<ItemFilters>({ mod: '', hardcore: false });
+  const [filters, setFilters] = useState<ItemFilters>({
+    mod: '', hardcore: false,
+    minLevel: DEFAULT_MIN_LEVEL, maxLevel: DEFAULT_MAX_LEVEL,
+  });
   const [catalogue, setCatalogue] = useState<FilterCatalogue | null>(null);
   const [mods, setMods] = useState<ModInfo[]>([]);
   // Choosing a target stash is gated on the same setting upstream gates its stash picker with.
@@ -1179,8 +1219,15 @@ function App() {
   // Whether anything beyond the search box is narrowing the list — used to decide if a newly
   // looted item can be folded into the grid without contradicting the filters.
   const filteredRef = useRef(false);
-  filteredRef.current = Object.values(filters).some(
-    (value) => value !== undefined && value !== '' && value !== false && value !== 0);
+  // The level boxes always hold a number now, so "is anything narrowing the list" has to ask
+  // whether they hold anything other than their defaults — otherwise an untouched client
+  // reports itself as filtered and says "nothing matching those filters" on an empty
+  // collection, where "no items yet" is the truth.
+  filteredRef.current =
+    !isDefaultLevels(filters)
+    || Object.entries(filters).some(([key, value]) =>
+      key !== 'minLevel' && key !== 'maxLevel'
+      && value !== undefined && value !== '' && value !== false && value !== 0);
 
   const load = useCallback(async (search: ItemFilters, append = false) => {
     const page = await api.items(search, append ? items.length : 0, PAGE_SIZE);

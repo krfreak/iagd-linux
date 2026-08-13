@@ -1032,6 +1032,24 @@ The icons were never missing from disk: `tier1_relic_02.tex.png` had been extrac
 Nothing linked the record to it. Across this collection the fix takes named templates with an
 icon from 8,286 to 9,624, and owned items missing one from 12 to **0**.
 
+### The level boxes are never empty
+
+Upstream's level range starts at **0 and 110**, set in its designer and put back by
+`ClearFilters` (SplitSearchWindow). This port left both boxes blank, which looks like an
+unfinished control rather than a range that happens to cover everything.
+
+The numbers matter more than they look. Its query adds `LevelRequirement >= min` only when min is
+above zero, so 0 means "no minimum" rather than level zero; 110 is above anything the game
+requires, so `<= 110` excludes nothing. On this collection both defaults together return all
+7,483 items — whereas 1 and 100, which look like the obvious "sensible" defaults, quietly drop
+three: the Gazer Man torsos, whose level requirement is 0.
+
+A box can still be cleared while typing, and falls back to its default when it loses focus —
+upstream does the same, resetting an unparseable box on `Leave`. Because the boxes now always
+hold a value, "is anything narrowing the list" has to compare against the defaults rather than
+test for emptiness; otherwise an untouched client reports itself as filtered and tells a new user
+"nothing matching those filters" when the truth is "no items yet".
+
 ### Derived data has a version, and so does the parse
 
 Re-analysing could not have fixed those icons: an icon is chosen at **parse** time, and the
