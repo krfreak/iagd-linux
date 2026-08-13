@@ -46,7 +46,10 @@ export interface ItemDetail {
 
 export interface ItemPage {
   items: ItemCard[];
+  /** Cards matching, which is what paging walks. */
   total: number;
+  /** Items matching — the larger number, since identical items share a card. */
+  totalItems: number;
   skip: number;
   take: number;
 }

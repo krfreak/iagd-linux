@@ -55,7 +55,13 @@ public sealed record ItemDetail(ItemSummary Item, IReadOnlyList<ItemStatLine> St
 public sealed record ItemCard(ItemSummary Item, IReadOnlyList<ItemStatLine> Stats,
                               ItemSkillInfo? Skill, int Copies, IReadOnlyList<long> Duplicates);
 
-public sealed record ItemPage(IReadOnlyList<ItemCard> Items, int Total, int Skip, int Take);
+/// <param name="Total">Cards matching, which is what paging walks.</param>
+/// <param name="TotalItems">
+/// Items matching. Identical items share a card, so this is the larger number and the one worth
+/// showing: upstream's status bar reports the same thing (NumTotalItems, a COUNT over rows).
+/// </param>
+public sealed record ItemPage(IReadOnlyList<ItemCard> Items, int Total, int TotalItems,
+                              int Skip, int Take);
 
 /// <summary>What the UI needs to explain itself when something is not working.</summary>
 public sealed record HostStatus(

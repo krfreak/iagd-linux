@@ -872,6 +872,22 @@ Verified against real records: a revolver and Lokarr's Gaze are kept, Gazer Man 
 another quest torso is refused, and components, potions, scrap, quest items, the salt bag and a
 stack of twelve are all turned away.
 
+### Two totals, and which one to show
+
+Identical items share a card, so a search has two sizes: the number of cards, which is what
+paging walks, and the number of items, which is what a player recognises as the size of their
+collection. This port reported cards everywhere — "3,669 matching items found" for a collection
+of 7,483 — which reads as a bug because it is one.
+
+Upstream's status bar reports items: `NumTotalItems` comes from `SearchForItems`, a COUNT over
+PlayerItem rows, not over merged groups. Its "Displaying n/total" counts items on both sides too,
+summing the player items across the cards it has rendered.
+
+The search returns both numbers from one query now (`COUNT(*)` and `SUM` over the grouped rows).
+The status bar and the clipboard line report items; only "Load more" talks about cards, and says
+so. On this collection: 7,482 items, 3,668 cards, and a first page of 60 cards standing for 63
+items.
+
 ### Copy to clipboard
 
 Upstream's, from `ItemContainer`: a link above the list that puts the visible items on the

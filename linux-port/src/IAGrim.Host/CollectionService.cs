@@ -80,13 +80,24 @@ public sealed class CollectionService {
             LEFT OUTER JOIN ReplicaItem2 r ON p.Id = r.playeritemid
             """;
 
+        // Two totals, because they answer different questions. Paging walks *cards*, so the
+        // scroll has to stop at the number of groups. What the window reports is *items*, which
+        // is upstream's NumTotalItems — a COUNT over PlayerItem rows — and is the number a
+        // player recognises as the size of their collection. They differ a lot: 7,483 items in
+        // this collection are 3,669 cards.
         int total;
+        int totalItems;
         using (var count = connection.CreateCommand()) {
-            // Groups, not rows: the number the UI reports has to be the number of cards it can
-            // scroll through, or paging runs off the end.
-            count.CommandText = $"SELECT COUNT(*) FROM (SELECT 1 {from} WHERE {where} GROUP BY {MergeKey});";
+            count.CommandText = $"""
+                SELECT COUNT(*), IFNULL(SUM(n), 0) FROM (
+                    SELECT COUNT(*) AS n {from} WHERE {where} GROUP BY {MergeKey}
+                );
+                """;
             Bind(count, parameters);
-            total = Convert.ToInt32(count.ExecuteScalar());
+            using var reader = count.ExecuteReader();
+            reader.Read();
+            total = reader.GetInt32(0);
+            totalItems = reader.GetInt32(1);
         }
 
         // Upstream's ordering, from PlayerItemDaoImpl.SearchForItems: name then id, with the
@@ -161,7 +172,7 @@ public sealed class CollectionService {
             };
         }
 
-        return new ItemPage(cards, total, skip, take);
+        return new ItemPage(cards, total, totalItems, skip, take);
     }
 
     /// <summary>

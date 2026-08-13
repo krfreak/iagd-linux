@@ -1010,6 +1010,10 @@ function App() {
   const [allowRetarget, setAllowRetarget] = useState(false);
   const [items, setItems] = useState<ItemCardData[]>([]);
   const [total, setTotal] = useState(0);
+  // Cards are what the list pages through; items are what the window reports. Identical items
+  // share a card, so a collection of 7,483 items is 3,669 cards and saying "3,669 matching
+  // items found" is simply wrong. Upstream reports items too.
+  const [totalItems, setTotalItems] = useState(0);
   // Deep link: #item=7 opens that item directly, so a specific item can be linked to or
   // reopened after a reload.
   const [selected, setSelected] = useState<number | null>(() => {
@@ -1034,6 +1038,7 @@ function App() {
   const load = useCallback(async (search: ItemFilters, append = false) => {
     const page = await api.items(search, append ? items.length : 0, PAGE_SIZE);
     setTotal(page.total);
+    setTotalItems(page.totalItems);
     setItems((current) => (append ? [...current, ...page.items] : page.items));
   }, [items.length]);
 
@@ -1221,7 +1226,12 @@ function App() {
                       onClick={() => navigator.clipboard?.writeText(clipboardText(items))}
                     >
                       Copy to clipboard
-                      <span>Displaying {items.length}/{total}</span>
+                      {/* Items on both sides of the slash, as upstream counts them: it sums the
+                          player items across the cards it has rendered. */}
+                      <span>
+                        Displaying {items.reduce((n, c) => n + c.copies, 0).toLocaleString()}/
+                        {totalItems.toLocaleString()}
+                      </span>
                     </button>
                   )}
                 </header>
@@ -1269,7 +1279,7 @@ function App() {
                       ))}
                       {items.length < total && (
                         <button class="button items__more" onClick={() => load(search, true)}>
-                          Load more ({items.length} of {total})
+                          Load more ({items.length.toLocaleString()} of {total.toLocaleString()} cards)
                         </button>
                       )}
                     </section>
@@ -1381,7 +1391,7 @@ function App() {
 
       {/* The window's status bar, which upstream uses for the result count and its version. */}
       <footer class="statusbar">
-        <span>{tab === 'items' ? `${total.toLocaleString()} matching items found` : ''}</span>
+        <span>{tab === 'items' ? `${totalItems.toLocaleString()} matching items found` : ''}</span>
         <StatusBar status={status} />
       </footer>
 
