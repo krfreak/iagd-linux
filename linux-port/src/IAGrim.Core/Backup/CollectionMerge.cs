@@ -139,7 +139,14 @@ public static class CollectionMerge {
                 if (!existing.Add(identity)) { duplicates++; continue; }
 
                 var item = ReadItem(reader) with { KnownName = Blank(reader, 19) };
-                if (string.IsNullOrEmpty(item.BaseRecord)) { rejected++; continue; }
+
+                // Whatever the other collection allowed itself, this one keeps to the rules the
+                // hook applies while looting. A collection that predates a rule, or came from a
+                // tool with looser ones, must not carry them in.
+                if (!ItemAdmission.IsCollectable(item.BaseRecord, item.StackCount)) {
+                    rejected++;
+                    continue;
+                }
 
                 if (dryRun) { imported++; continue; }
 

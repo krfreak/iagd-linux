@@ -193,12 +193,17 @@ public static class ItemExport {
     /// the same one Grim Dawn uses for a rolled item. Re-importing the same file is therefore a
     /// no-op rather than a way to duplicate a collection.
     /// </summary>
-    public static (int Imported, int Skipped) Import(string databasePath, string file, string? mod = null) {
+    /// <param name="Refused">
+    /// Items the collection does not take at all — components, crafting materials, quest items,
+    /// stacks. See <see cref="ItemAdmission"/>.
+    /// </param>
+    public static (int Imported, int Skipped, int Refused) Import(string databasePath, string file, string? mod = null) {
         var items = Parse(File.ReadAllBytes(file));
 
         using var store = new LootStore(databasePath);
         var imported = 0;
         var skipped = 0;
+        var refused = 0;
 
         foreach (var item in items) {
             var looted = new LootedItem {
@@ -225,12 +230,15 @@ public static class ItemExport {
                 Stats = [],
             };
 
+            // The hook refuses components, crafting materials, quest items and stacks as they
+            // are looted; a file full of them must not get in through the side door.
+            if (!ItemAdmission.IsCollectable(looted.BaseRecord, looted.StackCount)) { refused++; continue; }
             if (store.Exists(looted)) { skipped++; continue; }
             store.Insert(looted);
             imported++;
         }
 
-        return (imported, skipped);
+        return (imported, skipped, refused);
     }
 
     private static string? Empty(string value) => string.IsNullOrEmpty(value) ? null : value;

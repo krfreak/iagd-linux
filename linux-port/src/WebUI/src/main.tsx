@@ -37,15 +37,21 @@ function StatusBar({ status }: { status: HostStatus | null }) {
     );
   }
 
-  // Rarity and level filters read columns the precompute pass fills in. Say so, because the
-  // failure mode is "the filter returns nothing", which looks like a bug rather than a
-  // missing step.
+  // Items still waiting to be described. The client does this itself — at startup, as items
+  // are imported, and after a merge — so this reports progress rather than asking for a
+  // command to be typed. The one case the user has to act on is a missing game folder, since
+  // the numbers come out of Grim Dawn's own archives.
   if (status.itemsNeedingStats > 0) {
     return (
       <div class="status status--warn">
-        <span class="dot dot--warn" /> {status.itemsNeedingStats} item(s) not analysed
+        <span class="dot dot--warn" />{' '}
+        {status.gameDir
+          ? `Analysing ${status.itemsNeedingStats.toLocaleString()} item(s)…`
+          : `${status.itemsNeedingStats.toLocaleString()} item(s) cannot be analysed`}
         <span class="status__detail">
-          run <code>iagd stats</code> — rarity and level filters need it
+          {status.gameDir
+            ? 'rarity and the level filters need it; the list works meanwhile'
+            : 'Grim Dawn was not found — set the game folder in Settings'}
         </span>
       </div>
     );

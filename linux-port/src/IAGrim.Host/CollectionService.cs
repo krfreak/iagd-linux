@@ -477,8 +477,19 @@ public sealed class CollectionService {
                     }
                 }
 
+                // Items that *can* be described and have not been. Not simply "no rarity": a
+                // quest item — records/storyelements/questassets/... — carries no
+                // itemClassification at all, so nothing will ever give it one. Counting those
+                // put a warning on screen that no amount of analysis could clear, and would
+                // have had the client rescanning the game archives at every launch to chase it.
                 using var command = connection.CreateCommand();
-                command.CommandText = "SELECT COUNT(*) FROM PlayerItem WHERE Rarity IS NULL;";
+                command.CommandText = """
+                    SELECT COUNT(*) FROM PlayerItem p
+                     WHERE p.Rarity IS NULL
+                       AND EXISTS (SELECT 1 FROM DatabaseItem_v2 db
+                                    JOIN DatabaseItemStat_v2 s ON s.id_databaseitem = db.id_databaseitem
+                                   WHERE db.baserecord = p.baserecord);
+                    """;
                 return Convert.ToInt32(command.ExecuteScalar());
             }
             catch (SqliteException) { return 0; }   // tables not created yet

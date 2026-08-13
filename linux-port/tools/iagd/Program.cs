@@ -582,8 +582,13 @@ internal static class Program {
         var safety = DatabaseBackup.Create(LinuxPaths.DatabaseFile, LinuxPaths.BackupDir, "before-import");
 
         try {
-            var (imported, skipped) = ItemExport.Import(LinuxPaths.DatabaseFile, args[1], ArgValue(args, "--mod"));
+            var (imported, skipped, refused) = ItemExport.Import(LinuxPaths.DatabaseFile, args[1],
+                                                                 ArgValue(args, "--mod"));
             Console.WriteLine($"Imported {imported:N0} item(s); skipped {skipped:N0} already present.");
+            if (refused > 0) {
+                Console.WriteLine($"{refused:N0} not collected: components, crafting materials, "
+                                  + "quest items and stacks, which Item Assistant has never kept.");
+            }
             if (imported > 0) {
                 Console.WriteLine("Run 'iagd stats' to compute their rolled values.");
             }
@@ -881,6 +886,7 @@ internal static class Program {
         LootStore? store = null;
         var imported = 0;
         var skipped = 0;
+        var refused = 0;
 
         if (wantImport) {
             // Importing adds to the one thing that cannot be regenerated.
@@ -933,6 +939,12 @@ internal static class Program {
                         Stats = [],
                     };
 
+                    // The same admission rules the hook applies while looting: a stash is full
+                    // of components and potions that Item Assistant has never collected.
+                    if (!ItemAdmission.IsCollectable(looted.BaseRecord, looted.StackCount)) {
+                        refused++;
+                        continue;
+                    }
                     if (store.Exists(looted)) { skipped++; continue; }
                     store.Insert(looted);
                     imported++;
@@ -946,6 +958,10 @@ internal static class Program {
         if (wantImport) {
             Console.WriteLine();
             Console.WriteLine($"Imported {imported:N0} item(s); skipped {skipped:N0} already in the collection.");
+            if (refused > 0) {
+                Console.WriteLine($"{refused:N0} not collected: components, crafting materials, "
+                                  + "quest items and stacks, which Item Assistant has never kept.");
+            }
             if (imported > 0) {
                 Console.WriteLine("Run 'iagd stats' to name them and compute their rolled values.");
             }

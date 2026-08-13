@@ -802,6 +802,25 @@ has emptied `DatabaseItemStat_v2`. It runs in the background and reports through
 channel a merge uses; the collection stays usable throughout, just incompletely described. The
 command still exists for when you want it immediately.
 
+### What may enter a collection
+
+Item Assistant has never collected everything the game drops. The hook decides as an item is
+looted (`InventorySack_AddItem::IsRelevant`): no components, no crafting materials, no quest
+items, nothing from the miscellaneous drawer, no salt bag, nothing that stacks, and nothing under
+`storyelements` apart from Lokarr's four pieces and the two Gazer Man torsos, which are real gear
+the game happens to file there.
+
+Anything the hook loots is therefore already filtered. This port's **file imports are not** — a
+transfer stash, a GD Stash file, another collection — and they had no equivalent rule, so a stash
+full of components would have gone straight in. `ItemAdmission` carries the hook's list and all
+three paths ask it first, reporting what they refused rather than silently dropping it.
+`verify-item-admission.sh` compares the two lists on every `make verify`, because a copied rule
+is a rule that drifts.
+
+Verified against real records: a revolver and Lokarr's Gaze are kept, Gazer Man is kept while
+another quest torso is refused, and components, potions, scrap, quest items, the salt bag and a
+stack of twelve are all turned away.
+
 ### Links this port does not carry
 
 Upstream's nav has Discord and Patreon links. They are deliberately absent here and should stay

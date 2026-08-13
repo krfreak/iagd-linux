@@ -51,4 +51,4 @@ Parser/Stash/Item.cs	d78b688cdf77a6a91d1d832f2ffd56dc29e1f719d610c473d2bf9c77146
 Parser/Stash/Stash.cs	ad89bcdc407fd97f2b9f1c3d8dc9bc53cec573102254c945985b4f9d17e19298
 Parser/Stash/StashTab.cs	c0a72a2aca3e973fd2f29232564f703666d3ea36e00231b9a11be0c2c0a86d07
 StatTranslator/ItemNameCombinator.cs	e1c3aa80e5aa5a234ca6632e48ee6828bcfed1f1fe757bd41ccd520a86ff70a8
-# reviewed against upstream 5ba6ec4 on 2026-08-12
+# reviewed against upstream 5ba6ec4 on 2026-08-13

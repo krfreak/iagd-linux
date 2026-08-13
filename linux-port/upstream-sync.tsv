@@ -13,6 +13,7 @@
 # Re-record hashes after reviewing a change with:  scripts/check-upstream.sh --accept
 #
 DllInjector/InjectionHelper.cs	scripts/attach-gd.sh	When it is safe to inject: window-based targeting, one attempt per pass, ABORTED handling
+HookDll/Hook/InventorySack_AddItem.cpp	src/IAGrim.Platform/ItemAdmission.cs	What may enter a collection: components, crafting, quest items, stacks, the story-element exceptions
 IAGrim/UI/UIHelper.cs	src/IAGrim.Core/ItemStats/SlotFilters.cs	Slot and rarity dropdown contents; item classes per slot
 HookDll/Hook/dllmain.cpp	patches/hook/dllmain.cpp.patch	Hook entry point, Wine IPC message format, injection abort protocol
 HookDll/Hook/InventorySack_AddItem.cpp	patches/hook/InventorySack_AddItem.cpp.patch	Instaloot and deposit hooks; loot CSV writer
