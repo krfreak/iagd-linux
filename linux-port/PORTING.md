@@ -872,6 +872,41 @@ Verified against real records: a revolver and Lokarr's Gaze are kept, Gazer Man 
 another quest torso is refused, and components, potions, scrap, quest items, the salt bag and a
 stack of twelve are all turned away.
 
+### Filtering by mastery
+
+Ticking Occultist returned items with no Occultist line on them — 336 of them in this
+collection, out of 1,966.
+
+Upstream's filter is an exact match on two synthesised fields:
+
+```sql
+dbs.stat IN ('augmentSkill1Extras'..'augmentSkill4Extras', 'augmentMastery1'..'augmentMastery4')
+AND dbs.TextValue = 'class03'
+```
+
+Neither field exists in the game's own data — `ArzParser` creates them while parsing, from the
+pairs that do (`augmentSkillName{i}` with `augmentSkillLevel{i}`, `augmentMasteryName{i}` with
+its level), and stores the **class id** in `TextValue`. An earlier note in this port recorded
+those fields as occurring "zero times", which was measured against the raw archives rather than
+against a parsed database, and led to a substitute filter that matched the *record path* of
+`augmentSkillName` instead.
+
+That substitute answered a different question. A record path matches whenever an item so much as
+references a skill of that mastery — including one it only *modifies* — so "Touch of Purity",
+which grants Inquisitor and Oathkeeper, came back under Occultist because a skill it modifies
+lives under `playerclass03/`.
+
+The precompute now synthesises both fields the way upstream does, gated the way upstream gates
+them: nothing is written for a skill whose display name does not resolve, since that is a skill
+the item modifies rather than grants. The filter is upstream's clause verbatim. Occultist goes
+from 1,966 items to 1,630, and the ones that remain carry lines like "+2 to Sigil of Consumption"
+— Occultist skills — or "+1 to All Skills in Occultist".
+
+The one thing not reproduced is upstream's walk to a skill's *root* to read its tier; the tier is
+read off the skill itself, which is where the class skills that have one carry it. The tier only
+decorates the line ("Tier 3 Occultist skill"); the class id, which is what the filter compares,
+is the same either way.
+
 ### Two totals, and which one to show
 
 Identical items share a card, so a search has two sizes: the number of cards, which is what

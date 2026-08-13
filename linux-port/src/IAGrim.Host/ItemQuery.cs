@@ -404,20 +404,22 @@ internal static class ItemQueryBuilder {
             // Values are class ids ("class03"), which is what upstream's checkboxes are keyed by.
             if (!IsSafeIdentifier(desiredClass)) continue;
 
-            // PORT: upstream searches augmentSkill1Extras..4Extras and augmentMastery1..4 and
-            // compares TextValue to the class id. Scanning all 4.8M stat rows of this
-            // installation, those eight field names occur ZERO times — the real fields are
-            // augmentMasteryName1..3 and augmentSkillName1..5, and they hold a record path
-            // (records/skills/playerclass03/_classtraining_class03.dbr), not a class id.
-            // Upstream's filter therefore matches nothing, whatever is ticked.
+            // Upstream's own fields and its exact test: the class filter compares against the
+            // synthesised augmentSkill{i}Extras and augmentMastery{i} rows, whose TextValue is a
+            // class id.
             //
-            // Matching the real fields on the path instead. The class id maps to the record's
-            // "playerclassNN" segment, which is how Grim Dawn names the mastery's skill tree.
-            var classStats = QuotedList(
-                IAGrim.Core.ItemStats.FilterGroups.ClassFields.Select(f => petPrefix + f));
+            // This port used to match the *record path* of augmentSkillName instead, on the
+            // mistaken grounds that upstream's fields were absent — they are absent from the raw
+            // game data and created during parsing, which is where that reading went wrong. The
+            // path match also answered a different question: it matched any item merely
+            // referencing a skill of that mastery, including items that only modify one, so
+            // filtering by Occultist returned hundreds of items with no Occultist line on them.
+            var classStats = QuotedList(new[] {
+                "augmentSkill1Extras", "augmentSkill2Extras", "augmentSkill3Extras", "augmentSkill4Extras",
+                "augmentMastery1", "augmentMastery2", "augmentMastery3", "augmentMastery4",
+            }.Select(f => petPrefix + f));
 
-            var playerClass = $"playerclass{desiredClass["class".Length..]}";
-            conditions.Add($"dbs.stat IN ({classStats}) AND dbs.TextValue LIKE '%{playerClass}/%'");
+            conditions.Add($"dbs.stat IN ({classStats}) AND dbs.TextValue = '{desiredClass}'");
         }
 
         foreach (var condition in conditions) {

@@ -393,11 +393,19 @@ public sealed class StatPrecomputeService {
         // same scan, since the skill records are streaming past anyway.
         var skillNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
+        // A skill's tier, for the "Tier 3 Occultist skill" note upstream attaches to a granted
+        // skill — and, more importantly, the thing whose presence decides whether that note (and
+        // with it the class filter's augmentSkill{i}Extras row) exists at all.
+        var skillTiers = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+
         foreach (var database in ItemDatabase.FindDatabases(_gameDir)) {
             progress?.Invoke($"scanning {Path.GetFileName(database)}");
             foreach (var (record, stats) in ItemDatabase.LoadAllStats(database, applyStatFilter: false)) {
                 var displayName = stats.FirstOrDefault(s => s.Stat == "skillDisplayName")?.TextValue;
                 if (displayName is not null) skillNames[record] = displayName;
+
+                var tier = stats.FirstOrDefault(s => s.Stat == "skillTier");
+                if (tier is not null) skillTiers[record] = tier.Value;
 
                 if (!wanted.Contains(record)) continue;
 
@@ -415,7 +423,7 @@ public sealed class StatPrecomputeService {
             }
         }
 
-        AddSkillAugments(result, skillNames, tagNames);
+        AddSkillAugments(result, skillNames, skillTiers, tagNames);
         return result;
     }
 
@@ -427,34 +435,79 @@ public sealed class StatPrecomputeService {
     /// record — and the format strings ("+{0} to {3}", "+{0} to All Skills in {3}") come from
     /// upstream's own language table, so a resolved tag is all that is needed here.
     /// </summary>
+    /// <summary>
+    /// The mastery a skill record belongs to, as upstream's <c>ExtractClassFromRecord</c> reads
+    /// it: the "playerclassNN" segment of the path is the class id the filters compare against.
+    /// </summary>
+    private static string? ClassOf(string record) {
+        var match = System.Text.RegularExpressions.Regex.Match(record, @"/player(class\d+)/");
+        return match.Success ? match.Groups[1].Value : null;
+    }
+
     private static void AddSkillAugments(
         Dictionary<string, List<DBStatRow>> statsByRecord,
         Dictionary<string, string> skillNames,
+        Dictionary<string, double> skillTiers,
         Dictionary<string, string> tagNames) {
 
         foreach (var (record, stats) in statsByRecord) {
             for (var i = 1; i <= 4; i++) {
                 // The skill's name is stored resolved: the rules put TextValue straight into
                 // the line ("+{0} to {3}") without a tag lookup of their own.
-                Merge(stats, $"augmentSkillName{i}", $"augmentSkillLevel{i}", $"augmentSkill{i}",
-                      skill => skillNames.TryGetValue(skill, out var tag)
-                            && tagNames.TryGetValue(tag, out var text) ? text : null);
+                //
+                // Only when it resolves does anything get written — upstream gives up on the
+                // whole pair at that point (GetSpecialSkillAugments continues past it), and the
+                // Extras row below hangs off the same decision. A skill with no display name is
+                // one the item modifies rather than grants, and neither belongs on a card nor in
+                // a class filter's results.
+                var granted = Merge(stats, $"augmentSkillName{i}", $"augmentSkillLevel{i}",
+                                    $"augmentSkill{i}",
+                                    skill => skillNames.TryGetValue(skill, out var tag)
+                                          && tagNames.TryGetValue(tag, out var text) ? text : null);
 
-                // The mastery's stays a tag: TryGetClassName resolves it, and passing the
-                // resolved text would make that lookup fail and print nothing.
+                // The mastery's is the **class id**, which is what upstream stores here and what
+                // its class filter compares against ("dbs.TextValue = 'class03'"). It renders too:
+                // StatManager passes it through TryGetClassName, and the language table maps
+                // class03 to Occultist.
                 Merge(stats, $"augmentMasteryName{i}", $"augmentMasteryLevel{i}", $"augmentMastery{i}",
-                      mastery => skillNames.TryGetValue(mastery, out var tag) ? tag : null);
+                      ClassOf);
+
+                // "Tier 3 Occultist skill", and the row the class filter matches on for an item
+                // that grants a specific skill. Upstream writes it beside augmentSkill{i} from
+                // the skill's class and the tier of its root skill; this reads the tier off the
+                // skill itself, which is where it sits for the class skills that carry one.
+                if (granted) AddExtras(stats, i, skillTiers);
             }
         }
 
-        static void Merge(List<DBStatRow> stats, string nameStat, string levelStat, string merged,
+        static void AddExtras(List<DBStatRow> stats, int index, Dictionary<string, double> skillTiers) {
+            var skill = stats.FirstOrDefault(s => s.Stat == $"augmentSkillName{index}")?.TextValue;
+            var level = stats.FirstOrDefault(s => s.Stat == $"augmentSkillLevel{index}");
+            if (skill is null || level is null) return;
+
+            // No tier means upstream writes no Extras row, and an item that only *references* a
+            // skill — a modifier, rather than "+2 to it" — has no business matching a class.
+            if (!skillTiers.TryGetValue(skill, out var tier)) return;
+
+            var className = ClassOf(skill);
+            if (className is null) return;
+
+            stats.Add(new DBStatRow {
+                Record    = stats.FirstOrDefault()?.Record,
+                Stat      = $"augmentSkill{index}Extras",
+                Value     = tier,
+                TextValue = className,
+            });
+        }
+
+        static bool Merge(List<DBStatRow> stats, string nameStat, string levelStat, string merged,
                           Func<string, string?> resolve) {
             var name = stats.FirstOrDefault(s => s.Stat == nameStat)?.TextValue;
             var level = stats.FirstOrDefault(s => s.Stat == levelStat);
-            if (name is null || level is null) return;
+            if (name is null || level is null) return false;
 
             var resolved = resolve(name);
-            if (resolved is null) return;
+            if (resolved is null) return false;
 
             stats.Add(new DBStatRow {
                 Record    = stats.FirstOrDefault()?.Record,
@@ -462,6 +515,7 @@ public sealed class StatPrecomputeService {
                 Value     = level.Value,
                 TextValue = resolved,
             });
+            return true;
         }
     }
 }
