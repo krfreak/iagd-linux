@@ -1,6 +1,6 @@
 # Item Assistant for Grim Dawn — Linux port
 
-A native Linux build of [Item Assistant][iagd], the item stash manager for Grim Dawn. Same
+A native Linux WIP build of [Item Assistant][iagd], the item stash manager for Grim Dawn. Same
 collection, same database file, no Wine for the app itself.
 
 The game runs under Proton; only the small hook DLL that watches your stash is a Windows
@@ -12,11 +12,13 @@ collection intact, and one written here stays loadable there. Where that constra
 it wins, because a collection can represent years of play and there is no export step to fall
 back on.
 
-**DISCLAIMER: This is not an official release of Item Assistant. It is a completely vibe-coded port that**
+**DISCLAIMER: This is not an official release of Item Assistant. It is a completely vibe-coded port with Claude Opus 5 that**
 **aims to reproduce the functionality of the original Windows version on Linux.**
 **Use at your own risk. This might destroy your items. Back them up.**
-**The original Item Assistant is maintained by [marius00](https://github.com/marius00). Support their effort.**
+**The original Item Assistant is maintained by [marius00](https://github.com/marius00). Support their effort over at [the official site](https://grimdawn.evilsoft.net/).**
 **Do not bug them about the work in this repository nor ask them for support.**
+
+This version has been tested on archlinux with GD running in Proton-GE 11-1 and against the upstream Windows version @1.5.9693.21779.
 
 ## What works
 
@@ -26,6 +28,16 @@ another collection in, mod support, and a desktop window with a tray icon.
 
 `linux-port/BACKLOG.md` lists what upstream has that this does not: cloud backup and buddy
 sharing, deferred rather than dropped.
+
+## What is left out
+
+I deliberately left out the cloud backup and buddy sharing features, because I don't want to mangle any data on
+the server [marius00](https://github.com/marius00) provides. If you want to use that data, download it to your
+machine and then merge it into your collection here to get access. No warranty of inconsistency between the two
+versions is provided, but it should be fine as long as you don't use the cloud features on this port.
+
+Translations are copied from upstream, but the UI is English-only. The Preact UI is a single-page app and does
+not have a translation framework.
 
 ## Building
 
