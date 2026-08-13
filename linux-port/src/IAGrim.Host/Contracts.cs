@@ -129,6 +129,31 @@ public sealed record HostStatus(
 /// <param name="GameDir">Which installation to read, or null for the configured one.</param>
 public sealed record ParseRequest(string? GameDir = null);
 
+/// <summary>A link the Support page asks the host to open. Only <see cref="SupportLinks"/>.</summary>
+public sealed record OpenRequest(string? Url = null);
+
+/// <summary>
+/// Where this port sends anyone who wants to support the work.
+///
+/// Item Assistant is Marius Andersen's; this repository is an unaffiliated Linux port of it, and
+/// the person who did the porting is not the person who wrote the tool. The Support page says so
+/// and points at the original, which is the only honest arrangement — and the reason these are
+/// the *only* URLs this project will open.
+///
+/// The Discord is deliberately not among them. Sending a Linux port's users to upstream's
+/// community puts support requests for code its maintainer did not write in front of him, which
+/// a page called Support would make more likely rather than less.
+/// </summary>
+public static class SupportLinks {
+    public const string Website = "https://grimdawn.evilsoft.net";
+    public const string Source = "https://github.com/marius00/iagd";
+    public const string Patreon = "https://www.patreon.com/itemassistant";
+
+    private static readonly HashSet<string> Allowed = [Website, Source, Patreon];
+
+    public static bool Contains(string url) => Allowed.Contains(url);
+}
+
 /// <param name="DryRun">Report what would happen without writing anything.</param>
 public sealed record MergeRequest(string? Path = null, bool DryRun = true);
 

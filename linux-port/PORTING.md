@@ -1051,6 +1051,34 @@ parse: Reading Grim Dawn's data…      ← visible in the status bar
 stats: …                              ← and the analysis that has to follow
 ```
 
+### The Support page, and the one place outbound links are allowed
+
+This project points at nothing of upstream's — not its Discord, not its Patreon, not its site —
+because doing so from a client someone else wrote implies an affiliation that does not exist and
+lands support requests on the wrong person.
+
+The Support page is the deliberate exception, and it exists to say the opposite of what those
+links would have implied by sitting in a nav bar: Item Assistant is Marius Andersen's work, this
+is an unaffiliated port of it, and support belongs with him rather than here. Three links:
+
+| | |
+| --- | --- |
+| `grimdawn.evilsoft.net` | the original tool |
+| `github.com/marius00/iagd` | its source, and where issues about *it* belong |
+| `patreon.com/itemassistant` | the author's funding |
+
+The Discord stays out. Sending a Linux port's users into upstream's community puts requests for
+code its maintainer did not write in front of him, which a page called Support would make more
+likely rather than less. That was the original objection and it survives the exception.
+
+**Opening them needs the host.** The app window is a WebKitGTK view with no external-link
+handling, so an anchor would navigate the client itself onto the page with no way back.
+`POST /api/open` runs `xdg-open`, and it is **allowlisted to exactly those three URLs** — it is
+otherwise an "open anything on the user's desktop" primitive, reachable by any page their
+browser has open while the client is running. Exact string match, so
+`https://www.patreon.com/itemassistant/../evil` is refused along with everything else. Each
+address is also drawn as text, so a headless session can read and copy what a button cannot open.
+
 ### The components page, which upstream does not have
 
 Upstream's "Components" nav entry is not a page. It is

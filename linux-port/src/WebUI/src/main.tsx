@@ -9,6 +9,7 @@ import {
 import { GrimText, StatLine, stripGrimText } from './GrimText';
 import { Help } from './Help';
 import { Components } from './Components';
+import { Support } from './Support';
 import './style.css';
 
 const PAGE_SIZE = 60;
@@ -23,7 +24,7 @@ const PAGE_SIZE = 60;
 type Tab = 'items' | 'online' | 'settings' | 'grimdawn';
 
 /** The tabs inside the item view, which upstream draws in the web page itself. */
-type View = 'items' | 'collections' | 'sets' | 'components' | 'help';
+type View = 'items' | 'collections' | 'sets' | 'components' | 'help' | 'support';
 
 function StatusBar({ status }: { status: HostStatus | null }) {
   if (!status) return <div class="status status--warn">Connecting to iagd-host…</div>;
@@ -1384,6 +1385,7 @@ function App() {
                       ['sets', 'Sets'],
                       ['components', 'Components'],
                       ['help', 'Help'],
+                      ['support', 'Support'],
                     ] as [View, string][]).map(([value, label]) => (
                       <a
                         key={value}
@@ -1425,6 +1427,8 @@ function App() {
                   {view === 'components' && <Components />}
 
                   {view === 'help' && <Help />}
+
+                  {view === 'support' && <Support />}
 
                   {view === 'items' && (
                     <section class="items">

@@ -473,6 +473,20 @@ export const api = {
     return fetch(`/api/components?${params}`).then(json<ComponentEntry[]>);
   },
 
+  /**
+   * Asks the host to open one of the Support page's links in the user's browser.
+   *
+   * The host allowlists them: the app window is a WebKitGTK view, so this is the only way out
+   * of it, and an endpoint that opens arbitrary URLs on the user's desktop would be reachable
+   * by any page their browser has open while the client is running.
+   */
+  open: (url: string) =>
+    fetch('/api/open', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    }).then(json<{ opened: boolean; error?: string }>),
+
   item: (id: number) => fetch(`/api/items/${id}`).then(json<ItemDetail>),
 
   /**

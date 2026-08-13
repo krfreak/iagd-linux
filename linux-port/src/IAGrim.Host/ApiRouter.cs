@@ -244,6 +244,38 @@ public sealed class ApiRouter {
             }
 
             // Upstream's "Load Database": read the game's data again on demand.
+            // Opens one of the Support page's links in the user's browser.
+            //
+            // The window is a WebKitGTK view with no external-link handling, so an ordinary
+            // anchor would navigate the app itself onto the page and leave no way back. The
+            // allowlist is not decoration: this endpoint is an "open anything on the user's
+            // desktop" primitive, and it is reachable by any page the browser has open while
+            // the host is running.
+            case ("POST", "/api/open"): {
+                var open = await ReadJsonAsync<OpenRequest>(context);
+                var url = open?.Url ?? "";
+
+                if (!SupportLinks.Contains(url)) {
+                    await Json_(context, new { error = "not an allowed link" }, 400);
+                    return;
+                }
+
+                try {
+                    using var opener = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo {
+                        FileName = "xdg-open",
+                        ArgumentList = { url },
+                        UseShellExecute = false,
+                    });
+                    await Json_(context, new { opened = opener is not null });
+                }
+                catch (Exception ex) {
+                    // No xdg-open, or no desktop session: the page falls back to opening it
+                    // itself, and shows the address either way.
+                    await Json_(context, new { opened = false, error = ex.Message });
+                }
+                return;
+            }
+
             case ("POST", "/api/parse"): {
                 var parse = await ReadJsonAsync<ParseRequest>(context);
                 var settings = _server?.Settings ?? AppSettings.Load();
