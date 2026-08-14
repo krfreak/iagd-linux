@@ -304,6 +304,82 @@ function ItemCard({ card, selected, onSelect, onTransfer, transferring }: {
 }
 
 /**
+ * Upstream's comparison modal (ItemComparer.tsx), reached from a card that stands for more than
+ * one item.
+ *
+ * Identical copies share a card — upstream merges on base record plus prefix plus suffix, and so
+ * does this port — but that key says nothing about what each copy *rolled*. Two greens with the
+ * same affixes can differ by fifty points of health, so "send one of these" is a real choice, and
+ * quietly sending the first row is the wrong answer to it. Upstream puts every copy on screen
+ * with its own tooltip and its own transfer link; this does the same.
+ *
+ * The copies are fetched when the modal opens. Upstream never has to: its search result already
+ * carries all of them. See api.details.
+ *
+ * Picking one closes the modal, which is upstream's behaviour too — there it falls out of the
+ * item list changing under the dialogue (componentWillReceiveProps), here it is said outright.
+ */
+function ItemComparer({ card, transfers, onTransfer, onClose }: {
+  card: ItemCardData;
+  transfers: Record<number, TransferState>;
+  onTransfer: (id: number) => void;
+  onClose: () => void;
+}) {
+  // Null while the copies are in flight, so "loading" and "none left" stay distinguishable.
+  const [copies, setCopies] = useState<ItemDetail[] | null>(null);
+  const ids = card.duplicates.join(',');
+
+  useEffect(() => {
+    let live = true;
+    setCopies(null);
+    api.details(card.duplicates)
+      .then((found) => { if (live) setCopies(found); })
+      .catch(() => { if (live) setCopies([]); });
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ids]);
+
+  return (
+    // Clicking away closes it, as upstream's outside-click handler does.
+    <div class="comparer" onClick={onClose}>
+      <div class="comparer__box" onClick={(e) => e.stopPropagation()}>
+        <header class="comparer__header">
+          <h2>Item Comparison</h2>
+          <span class="comparer__subject">
+            {stripGrimText(card.item.name)} · {card.copies} copies
+          </span>
+          <button class="comparer__close" onClick={onClose} title="Close (Esc)" aria-label="Close">
+            ×
+          </button>
+        </header>
+
+        <div class="comparer__list">
+          {copies === null && <div class="comparer__empty">Loading…</div>}
+          {copies?.length === 0 && (
+            <div class="comparer__empty">These copies are no longer in the collection.</div>
+          )}
+          {copies?.map((copy) => (
+            <ItemCard
+              key={copy.item.id}
+              // One copy, so the card offers the single transfer link and no "transfer all" —
+              // which is exactly what upstream's ReplicaItem shows.
+              card={{
+                item: copy.item, stats: copy.stats, skill: copy.skill,
+                copies: 1, duplicates: [copy.item.id],
+              }}
+              selected={false}
+              onSelect={() => {}}
+              onTransfer={() => onTransfer(copy.item.id)}
+              transferring={Boolean(transfers[copy.item.id]?.pending)}
+            />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
  * The filter sidebar, down the left of the item view.
  *
  * Upstream's five collapsible panels — Damage, Damage over Time, Misc, Resistances, Classes —
@@ -1213,9 +1289,16 @@ function App() {
   const [mergeProgress, setMergeProgress] = useState<MergeProgressEvent | null>(null);
   // Transfers outlive the panel and survive a reload, so they live here rather than in it.
   const [transfers, setTransfers] = useState<Record<number, TransferState>>({});
+  // The card whose copies are being compared, or null. Held here rather than in the card so it
+  // survives the list re-rendering underneath it.
+  const [comparing, setComparing] = useState<ItemCardData | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const queryRef = useRef(query);
   queryRef.current = query;
+  // The event handler below is registered once and cannot close over the list. Everything that
+  // changes the list is a functional update; this is only read to decide what a change means.
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
   // Whether anything beyond the search box is narrowing the list — used to decide if a newly
   // looted item can be folded into the grid without contradicting the filters.
   const filteredRef = useRef(false);
@@ -1309,11 +1392,55 @@ function App() {
           break;
         }
 
-        case 'itemRemoved':
-          setItems((current) => current.filter((c) => c.item.id !== event.data.id));
-          setTotal((t) => Math.max(0, t - 1));
-          setSelected((current) => (current === event.data.id ? null : current));
+        case 'itemRemoved': {
+          const removed = event.data.id;
+          // What left is one *item*, which is not the same as one card: a card standing for
+          // several identical copies keeps its place and reports one fewer. Upstream reduces
+          // the same way, in App.reduceItemCount, and for the same reason — transferring one
+          // of five must not take the other four off the screen.
+          const card = itemsRef.current.find((c) => c.duplicates.includes(removed));
+          const remaining = card ? card.duplicates.filter((id) => id !== removed) : [];
+
+          setItems((current) => current.flatMap((c) => {
+            if (!c.duplicates.includes(removed)) return [c];
+            const duplicates = c.duplicates.filter((id) => id !== removed);
+            if (duplicates.length === 0) return [];
+            return [{
+              ...c,
+              copies: duplicates.length,
+              duplicates,
+              // A card is drawn from one specific row. When that row is the one that left, the
+              // card now speaks for the survivors and has to become one of them — otherwise its
+              // transfer link and its detail panel both point at a row that no longer exists.
+              item: c.item.id === removed ? { ...c.item, id: duplicates[0] } : c.item,
+            }];
+          }));
+
+          // Items always drop by one; cards only when the last copy of one is gone. A removal
+          // for something not on screen says nothing about the card count — upstream does
+          // nothing at all in that case (reduceItemCount logs and returns).
+          setTotalItems((t) => Math.max(0, t - 1));
+          if (card && remaining.length === 0) setTotal((t) => Math.max(0, t - 1));
+
+          // The stat lines belong to the row that left, so the promoted copy brings its own.
+          // Everything the merge key covers — name, level, icon, rarity — is shared across the
+          // group, but the rolled values are exactly what is not.
+          if (card && remaining.length > 0 && card.item.id === removed) {
+            api.details([remaining[0]])
+              .then(([copy]) => {
+                if (!copy) return;
+                setItems((current) => current.map((c) => (
+                  c.item.id === copy.item.id
+                    ? { ...c, item: copy.item, stats: copy.stats, skill: copy.skill }
+                    : c
+                )));
+              })
+              .catch(() => {});
+          }
+
+          setSelected((current) => (current === removed ? null : current));
           break;
+        }
 
         case 'transferCompleted': {
           const { itemId, collected, message } = event.data;
@@ -1350,6 +1477,9 @@ function App() {
 
       if (event.key === 'Escape') {
         if (typing && query) { setQuery(''); return; }
+        // Innermost thing first: the comparison modal sits over the list, so Escape should
+        // close that rather than the panel behind it.
+        if (comparing) { setComparing(null); return; }
         setSelected(null);
         return;
       }
@@ -1362,7 +1492,7 @@ function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [query]);
+  }, [query, comparing]);
 
   useEffect(() => {
     if (!toast) return;
@@ -1370,9 +1500,7 @@ function App() {
     return () => clearTimeout(handle);
   }, [toast]);
 
-  const transferItem = async (card: ItemCardData, all: boolean) => {
-    // "Transfer all" sends every copy the card stands for; otherwise just the one it shows.
-    const ids = all ? card.duplicates : [card.item.id];
+  const transferItems = async (ids: number[]) => {
     for (const id of ids) {
       setTransfers((c) => ({ ...c, [id]: { transferId: null, message: 'Queueing…', pending: true } }));
       const result = await api.transfer(id);
@@ -1384,6 +1512,21 @@ function App() {
       }));
       if (!('transferId' in result)) { setToast(result.message); break; }
     }
+  };
+
+  /**
+   * What a card's transfer links do.
+   *
+   * "Transfer all" sends every copy the card stands for. The other link sends the item when the
+   * card is one item, and otherwise opens the comparison modal — because a card standing for
+   * several copies does not say which of them it would send, and they are not interchangeable:
+   * same records, different rolls. Upstream draws exactly this fork, in Item.tsx, where the
+   * label changes to "Compare & Transfer" once there is more than one.
+   */
+  const transferFromCard = (card: ItemCardData, all: boolean) => {
+    if (all) transferItems(card.duplicates);
+    else if (card.copies > 1) setComparing(card);
+    else transferItems([card.item.id]);
   };
 
   return (
@@ -1500,7 +1643,7 @@ function App() {
                           card={card}
                           selected={selected === card.item.id}
                           onSelect={() => setSelected(card.item.id)}
-                          onTransfer={(all) => transferItem(card, all)}
+                          onTransfer={(all) => transferFromCard(card, all)}
                           transferring={Boolean(transfers[card.item.id]?.pending)}
                         />
                       ))}
@@ -1514,6 +1657,17 @@ function App() {
                 </main>
               </div>
             </div>
+
+            {/* Which of several identical copies to send. Picking one closes it, as upstream's
+                does; so does Escape, and a click outside. */}
+            {comparing !== null && (
+              <ItemComparer
+                card={comparing}
+                transfers={transfers}
+                onClose={() => setComparing(null)}
+                onTransfer={(id) => { setComparing(null); transferItems([id]); }}
+              />
+            )}
 
             {selected !== null && (
               <ItemPanel

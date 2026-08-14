@@ -204,22 +204,90 @@ public sealed class CollectionService {
         return detail is null ? null : new ItemCard(detail.Item, detail.Stats, detail.Skill, 1, [id]);
     }
 
+    /// <summary>
+    /// The columns <see cref="ReadSummary"/> reads, for the queries that fetch whole rows rather
+    /// than a group's representative. The aliases are <see cref="SearchFrom"/>'s.
+    /// </summary>
+    private const string SummaryColumns = """
+        p.Id, p.Name, p.baserecord, p.Seed, p.IsHardcore,
+        COALESCE(tm.Name, tv.Name), COALESCE(tm.ItemClass, tv.ItemClass), COALESCE(tm.Quality, tv.Quality), p.LevelRequirement, COALESCE(tm.IconFile, tv.IconFile),
+        (SELECT rr.Text FROM ReplicaItemRow rr
+          WHERE rr.replicaitemid = r.Id AND rr.Type = 6
+          ORDER BY rr.Id LIMIT 1) AS RawName,
+        p.Rarity, p.PrefixRarity, p.StackCount
+        """;
+
+    /// <summary>
+    /// Several items in one round trip, each with its own tooltip, in the order asked for.
+    ///
+    /// This is what the comparison view reads. A card stands for every identical copy the player
+    /// owns — identical meaning upstream's merge key, base record plus prefix plus suffix — and
+    /// that is deliberately not the same as identical <em>stats</em>: two greens with the same
+    /// affixes roll different values. Choosing which copy goes into the stash therefore means
+    /// seeing each one, which is what upstream's ItemComparer shows.
+    ///
+    /// Upstream never needs a call like this: its search result already carries every item of
+    /// every group. This port sends one card per group precisely so a page of a thousand items
+    /// is not a thousand tooltips, and so pays for the copies when the player asks to see them.
+    ///
+    /// Ids that no longer exist are dropped rather than reported: a copy transferred from
+    /// another window is gone, and the honest answer is the copies that remain.
+    /// </summary>
+    public IReadOnlyList<ItemDetail> Details(IReadOnlyList<long> ids) {
+        // Far above any real group — the largest in a 7,600 item collection is around 25 — and
+        // low enough that the id list stays a sane SQL statement.
+        var wanted = ids.Distinct().Take(500).ToList();
+        if (wanted.Count == 0) return [];
+
+        using var connection = Open();
+
+        // Inlined rather than parameterised for the same reason StatsFor inlines them: these are
+        // row ids, already parsed as numbers, and SQLite caps parameter count.
+        var idList = string.Join(",", wanted);
+
+        var summaries = new Dictionary<long, ItemSummary>();
+        using (var command = connection.CreateCommand()) {
+            command.CommandText = $"""
+                SELECT {SummaryColumns}
+                {SearchFrom}
+                WHERE p.Id IN ({idList});
+                """;
+            using var reader = command.ExecuteReader();
+            while (reader.Read()) {
+                var summary = ReadSummary(reader);
+                summaries[summary.Id] = summary;
+            }
+        }
+
+        var found = summaries.Keys.ToList();
+        var stats = StatsFor(connection, found);
+        var skills = SkillsFor(connection, found);
+
+        var result = new List<ItemDetail>(summaries.Count);
+        foreach (var id in wanted) {
+            if (!summaries.TryGetValue(id, out var summary)) continue;
+
+            // Search's precedence: the tooltip the game drew when there is one, the computed
+            // description otherwise. A comparison that fell back inconsistently would be
+            // comparing two different descriptions of the same item.
+            var captured = stats.TryGetValue(id, out var lines) ? lines : [];
+            result.Add(new ItemDetail(
+                summary,
+                captured.Count > 0 ? captured : Computed(connection, id),
+                skills.TryGetValue(id, out var skill) ? skill : null));
+        }
+
+        return result;
+    }
+
     public ItemDetail? Get(long id) {
         using var connection = Open();
 
         ItemSummary summary;
         using (var command = connection.CreateCommand()) {
-            command.CommandText = """
-                SELECT p.Id, p.Name, p.baserecord, p.Seed, p.IsHardcore,
-                       COALESCE(tm.Name, tv.Name), COALESCE(tm.ItemClass, tv.ItemClass), COALESCE(tm.Quality, tv.Quality), p.LevelRequirement, COALESCE(tm.IconFile, tv.IconFile),
-                       (SELECT rr.Text FROM ReplicaItemRow rr
-                         WHERE rr.replicaitemid = r.Id AND rr.Type = 6
-                         ORDER BY rr.Id LIMIT 1) AS RawName,
-                       p.Rarity, p.PrefixRarity, p.StackCount
-                FROM PlayerItem p
-                LEFT JOIN ItemTemplate tm ON tm.Record = p.baserecord AND tm.Mod = IFNULL(p.Mod, '')
-                LEFT JOIN ItemTemplate tv ON tv.Record = p.baserecord AND tv.Mod = ''
-                LEFT OUTER JOIN ReplicaItem2 r ON p.Id = r.playeritemid
+            command.CommandText = $"""
+                SELECT {SummaryColumns}
+                {SearchFrom}
                 WHERE p.Id = $id;
                 """;
             command.Parameters.AddWithValue("$id", id);

@@ -490,6 +490,22 @@ export const api = {
   item: (id: number) => fetch(`/api/items/${id}`).then(json<ItemDetail>),
 
   /**
+   * Several items at once, each with its own tooltip — what the comparison view shows.
+   *
+   * A card stands for every identical copy, and identical there means the records the items are
+   * made of, not the values they rolled. Upstream's search result carries every copy already;
+   * this port sends one card per group so a page is not a thousand tooltips, and fetches the
+   * copies when the player asks to compare them.
+   *
+   * Ids that no longer exist come back missing rather than as an error, so the result can be
+   * shorter than the request.
+   */
+  details: (ids: number[]) =>
+    ids.length === 0
+      ? Promise.resolve([] as ItemDetail[])
+      : fetch(`/api/items/details?ids=${ids.join(',')}`).then(json<ItemDetail[]>),
+
+  /**
    * Queues an item to go back into the game. Returns as soon as the file is written — the
    * hook only deposits while the player has the transfer stash open, so waiting for it here
    * would block for minutes and be lost on reload. The result arrives as a

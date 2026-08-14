@@ -73,6 +73,15 @@ public sealed class ApiRouter {
                 return;
             }
 
+            // The copies behind one card, each with its own rolled values — what the comparison
+            // view shows before the player picks which one to send. The ids come from the card
+            // rather than being re-derived from its merge key here, because the group is the set
+            // of rows *that search* matched: two items made of the same records but looted under
+            // different mods are one group to the merge key and two cards on screen.
+            case ("GET", "/api/items/details"):
+                await Json_(context, _collection.Details(ParseIds(query["ids"])));
+                return;
+
             // Not branch-scoped, and upstream's is not either: its collection query counts
             // softcore and hardcore copies of each item side by side and never looks at the mod
             // (ItemCollectionDaoImpl.GetItemCollection).
@@ -650,6 +659,14 @@ public sealed class ApiRouter {
     private static int ParseInt(string? value, int fallback) =>
         int.TryParse(value, out var parsed) ? parsed : fallback;
 
+    /// <summary>A comma-separated list of row ids. Anything that is not one is dropped.</summary>
+    private static List<long> ParseIds(string? value) =>
+        (value ?? string.Empty)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(part => long.TryParse(part, out var id) ? id : -1)
+            .Where(id => id >= 0)
+            .ToList();
+
     private static async Task<T?> ReadJsonAsync<T>(HttpListenerContext context) {
         if (context.Request.ContentLength64 <= 0) return default;
         using var reader = new StreamReader(context.Request.InputStream, Encoding.UTF8);
@@ -691,6 +708,7 @@ public sealed class ApiRouter {
                  &minLevel=  &maxLevel=  &mod=  &hardcore=
                  &stat=offensiveBaseFireMin>=50         repeatable; a+b sums fields
           GET  /api/items/{id}
+          GET  /api/items/details?ids=1,2 several items with their own tooltips
           GET  /api/collection            every legendary/epic, and what you own
           GET  /api/collection/stats      owned counts by rarity and slot
           GET  /api/sets?q=               item sets and set completion

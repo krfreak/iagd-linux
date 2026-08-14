@@ -1283,6 +1283,37 @@ The status bar and the clipboard line report items; only "Load more" talks about
 so. On this collection: 7,482 items, 3,668 cards, and a first page of 60 cards standing for 63
 items.
 
+### Which of several identical copies gets transferred
+
+A card stands for every identical copy in the collection, where identical is upstream's merge key
+from `ItemOperationsUtility.MergeStackSize`: base record plus prefix plus suffix. That key says
+nothing about what each copy *rolled*. Two greens with the same affixes routinely differ by fifty
+points of health, so a card offering "transfer one of these" is offering a real choice.
+
+Upstream's `Item.tsx` renames its transfer link to "Compare & Transfer" once a card holds more
+than one item, and the link opens `ItemComparer` — a modal listing every copy as its own card,
+each with its own tooltip and its own transfer link. Only then does anything move, and what moves
+is the copy that was clicked (`transferSingle` sends `PI/<id>/...`, an individual row).
+
+This port had upstream's label and none of that behaviour: the link transferred `card.item.id`,
+the row `MIN(p.Id)` had picked to represent the group. Picking the best of twenty rolls was
+impossible, and the item that left was arbitrary.
+
+The modal is now there. What differs from upstream is where the copies come from: upstream's
+search result already carries every item of every group (`List<List<JsonItem>>`), while this port
+sends one card per group precisely so a page of a thousand items is not a thousand tooltips. So
+the copies are fetched when the modal opens, through `GET /api/items/details?ids=` — the ids the
+card is already carrying. The ids come from the card rather than being re-derived from the merge
+key on the host, because a group is the set of rows *that search* matched: two items made of the
+same records but looted under different mods are one merge key and two cards on screen.
+
+Transferring one copy of several also changed what a removal means. `itemRemoved` used to drop
+any card whose face matched the id, which took the other nineteen copies off the screen with it.
+It now reduces the card — upstream's `App.reduceItemCount` — and only removes it with its last
+copy. When the row that left was the card's face, the card adopts a survivor and fetches its
+tooltip: everything the merge key covers is shared across the group, but the rolled values are
+exactly what is not.
+
 ### Copy to clipboard
 
 Upstream's, from `ItemContainer`: a link above the list that puts the visible items on the

@@ -986,6 +986,70 @@ body {
 .item__links a { color: #eeeeeec4; font-size: 12px; cursor: pointer; }
 .item__links a:hover { text-decoration: underline; }
 
+/* --- the comparison modal -------------------------------------------------- */
+/* Upstream's ItemComparer.module.css: a wide panel over the list, its own scroll, and a header
+   with a close button in the corner. The cards inside are the same cards as the list's — the
+   point of the screen is comparing rolls, so they have to be drawn the same way. */
+.comparer {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: rgb(0 0 0 / 55%);
+  display: flex;
+  justify-content: center;
+  /* Top-aligned so a pair of copies is a short dialogue rather than a full-height box with
+     600px of nothing under it; it grows to the window and then scrolls. */
+  align-items: flex-start;
+  padding: 40px 24px;
+}
+
+.comparer__box {
+  width: min(1400px, 100%);
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  box-shadow: 0 4px 20px rgb(0 0 0 / 50%);
+}
+
+.comparer__header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.comparer__header h2 { margin: 0; font-size: 15px; }
+.comparer__subject { color: var(--text-dim); font-size: 13px; }
+.comparer__close {
+  margin-left: auto;
+  padding: 0 6px;
+  font-size: 20px;
+  line-height: 1;
+  color: var(--text-dim);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+.comparer__close:hover { color: var(--text); }
+
+/* Scrolls on its own, so a group of twenty does not push the header off the screen. */
+.comparer__list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+.comparer__empty { grid-column: 1 / -1; padding: 30px; text-align: center; color: var(--text-dim); }
+/* In the list a card opens the detail panel; here it is one of a set being read side by side,
+   and only its transfer link does anything. */
+.comparer__list .item { cursor: default; }
+
 /* --- the tabs that are not the item list --------------------------------- */
 .tabpage { flex: 1; overflow-y: auto; padding: 20px 24px; max-width: 900px; }
 .tabpage h2 { margin-top: 0; color: var(--accent); }
