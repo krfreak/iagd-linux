@@ -5,6 +5,7 @@ import {
   ItemFilters, RARITIES, LANGUAGE_NAMES,
   CollectionEntry, SetEntry, Settings, FilterCatalogue, FilterGroup, ModInfo, TransferTarget,
   MergePreview, MergeProgressEvent, ItemStatLine,
+  CloudStatus, Buddy, BackedUpCharacter, CharacterBackupState,
 } from './api';
 import { GrimText, StatLine, stripGrimText } from './GrimText';
 import { Help } from './Help';
@@ -689,6 +690,406 @@ function Toolbar({ filters, onChange, catalogue, mods, query, onQuery, searchRef
  * Windows tool rewriting it both silently revert the setting. The symptom is loot quietly not
  * being captured, so the disagreement is worth showing rather than hiding.
  */
+/**
+ * Upstream's "Backups" tab: online backup, buddy sharing, and character saves.
+ *
+ * The service belongs to upstream's author and is run for free, so this panel is written to make
+ * the *cost* of each switch visible rather than to sell the feature. "I play on more than one
+ * PC" in particular is not a convenience toggle — it multiplies how often this client talks to
+ * the server and opens a live socket — so it says so where it is switched on.
+ *
+ * Nothing here polls the service. It polls the local host, which answers from state the
+ * background loops already hold.
+ */
+function OnlineView({ onToast }: { onToast: (text: string) => void }) {
+  const [status, setStatus] = useState<CloudStatus | null>(null);
+  const [buddies, setBuddies] = useState<Buddy[]>([]);
+  const [characters, setCharacters] = useState<BackedUpCharacter[]>([]);
+  const [charBackup, setCharBackup] = useState<CharacterBackupState | null>(null);
+  /** Per-character download state, keyed by name: 'preparing', 'opened', or an error. */
+  // Per character: what the last download attempt did, and the link itself when the host could
+  // not open it for us.
+  const [downloads, setDownloads] = useState<Record<string, { message: string; url?: string }>>({});
+  const [unavailable, setUnavailable] = useState(false);
+  const [buddyId, setBuddyId] = useState('');
+  const [buddyName, setBuddyName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  const refresh = useCallback(async () => {
+    try {
+      const next = await api.cloud();
+      setStatus(next);
+      setUnavailable(false);
+      if (next.state === 'authorized') {
+        setBuddies(await api.buddies());
+        const backups = await api.characters().catch(() => null);
+        setCharacters(backups?.characters ?? []);
+        setCharBackup(backups?.backup ?? null);
+      } else {
+        setBuddies([]);
+        setCharacters([]);
+        setCharBackup(null);
+      }
+    } catch {
+      // A host built without online sync answers 503 here.
+      setUnavailable(true);
+    }
+  }, []);
+
+  // A login finishes in the browser with no callback, so the panel has to look rather than be
+  // told. Five seconds is slow enough to be free and quick enough that a login feels finished.
+  useEffect(() => {
+    refresh();
+    const timer = setInterval(refresh, 5000);
+    return () => clearInterval(timer);
+  }, [refresh]);
+
+  if (unavailable) {
+    return (
+      <div class="tabpage">
+        <h2>Online</h2>
+        <p>Online sync is not running in this host.</p>
+      </div>
+    );
+  }
+
+  if (!status) {
+    return (
+      <div class="tabpage">
+        <h2>Online</h2>
+        <p>Checking…</p>
+      </div>
+    );
+  }
+
+  const authorized = status.state === 'authorized';
+
+  const run = async (action: () => Promise<unknown>) => {
+    setBusy(true);
+    try { await action(); } finally { setBusy(false); await refresh(); }
+  };
+
+  const login = () => run(async () => {
+    const result = await api.cloudLogin();
+    if (result.error) { onToast(result.error); return; }
+    if (result.loginUrl) {
+      onToast('Finish signing in in your browser.');
+      window.open(result.loginUrl, '_blank', 'noopener');
+    }
+  });
+
+  const addBuddy = () => run(async () => {
+    const id = Number(buddyId.replace(/\D/g, ''));
+    if (!id) { onToast('A buddy id is six digits.'); return; }
+    const result = await api.addBuddy(id, buddyName.trim());
+    if (result.error) { onToast(result.error); return; }
+    setBuddyId('');
+    setBuddyName('');
+    onToast(`Following ${buddyName.trim() || id}.`);
+  });
+
+  return (
+    <div class="tabpage">
+      <h2>Online</h2>
+
+      {/* A development build must never be mistaken for one syncing a real collection. */}
+      {status.environment === 'localdev' && (
+        <p class="notice notice--warning">
+          Pointed at <code>{status.host}</code>, not the live backup service.
+        </p>
+      )}
+
+      <section class="settings">
+        <h3>Backup</h3>
+
+        {status.state === 'unknown' && (
+          <p>
+            The backup service could not be reached. Your items are safe here; nothing is being
+            sent. This usually clears up by itself.
+          </p>
+        )}
+
+        {status.state === 'unauthorized' && (
+          <>
+            <p>
+              Signing in copies your collection to Item Assistant's backup service, so it survives
+              this machine and can be shared with friends. It is optional, and everything works
+              without it.
+            </p>
+            <button class="button" disabled={busy || status.optOutOfBackups} onClick={login}>
+              Sign in
+            </button>
+            {status.pendingLoginUrl && (
+              <p>
+                Waiting for the browser… <a href={status.pendingLoginUrl} target="_blank" rel="noopener">
+                  open the sign-in page again
+                </a>
+              </p>
+            )}
+          </>
+        )}
+
+        {authorized && (
+          <>
+            <p>
+              Signed in as <strong>{status.user}</strong>.
+              {status.pendingUploads > 0
+                ? ` ${status.pendingUploads.toLocaleString()} item(s) still to upload.`
+                : ' Everything is backed up.'}
+              {status.pendingDeletions > 0
+                && ` ${status.pendingDeletions.toLocaleString()} deletion(s) still to send.`}
+            </p>
+            <p class="hint">
+              Uploads are paced by the server, so a large collection takes a while. Leaving this
+              open is enough.
+            </p>
+
+            <label class="field field--check">
+              <input
+                type="checkbox"
+                checked={status.usingDualComputer}
+                disabled={busy}
+                onChange={(e) => run(() => api.cloudSettings({
+                  usingDualComputer: (e.target as HTMLInputElement).checked,
+                }))}
+              />
+              <span>
+                I play on more than one PC
+                <small>
+                  Syncs both ways far more often and keeps a live connection open, so items and
+                  transfers cross within seconds. Leave it off on a single machine: it multiplies
+                  how much this asks of the service.
+                  {status.usingDualComputer && (status.liveSyncConnected
+                    ? ' Live sync is connected.'
+                    : ' Live sync is not connected right now.')}
+                </small>
+              </span>
+            </label>
+
+            <div class="field">
+              <button class="button" disabled={busy} onClick={() => run(async () => {
+                const result = await api.cloudLogout();
+                onToast(result.message);
+              })}>
+                Sign out
+              </button>
+              <p class="hint">
+                Your items stay in this collection. Buddy items are removed — they were never
+                yours.
+              </p>
+            </div>
+
+            {/* Destructive and irreversible on the server, so it asks twice and says what goes. */}
+            <div class="field">
+              {confirmingDelete ? (
+                <>
+                  <button class="button button--danger" disabled={busy} onClick={() => run(async () => {
+                    const result = await api.cloudDeleteAccount();
+                    onToast(result.error ?? result.message ?? 'Deleted.');
+                    setConfirmingDelete(false);
+                  })}>
+                    Yes, delete my online backup
+                  </button>
+                  <button class="button" onClick={() => setConfirmingDelete(false)}>Cancel</button>
+                  <p class="hint">
+                    This deletes your account and every item in it from the server, for good.
+                    The collection on this machine is not touched.
+                  </p>
+                </>
+              ) : (
+                <button class="button" onClick={() => setConfirmingDelete(true)}>
+                  Delete my online backup…
+                </button>
+              )}
+            </div>
+          </>
+        )}
+
+        <label class="field field--check">
+          <input
+            type="checkbox"
+            checked={status.optOutOfBackups}
+            disabled={busy || authorized}
+            onChange={(e) => run(() => api.cloudSettings({
+              optOutOfBackups: (e.target as HTMLInputElement).checked,
+            }))}
+          />
+          <span>
+            I don't want any online features
+            <small>Stops buddy sync and hides the sign-in. Sign out first to change this.</small>
+          </span>
+        </label>
+      </section>
+
+      {authorized && (
+        <section class="settings">
+          <h3>Buddies</h3>
+          <p>
+            A buddy id lets someone browse your items. Yours is{' '}
+            <strong>{status.buddyId ?? '—'}</strong>. Sharing it is one-way: they see your
+            collection, you see nothing of theirs unless they give you theirs too.
+          </p>
+
+          <div class="field field--row">
+            <input
+              class="input"
+              placeholder="Buddy id"
+              inputMode="numeric"
+              maxLength={6}
+              value={buddyId}
+              onInput={(e) => setBuddyId((e.target as HTMLInputElement).value)}
+            />
+            <input
+              class="input"
+              placeholder="Nickname"
+              value={buddyName}
+              onInput={(e) => setBuddyName((e.target as HTMLInputElement).value)}
+            />
+            <button class="button" disabled={busy} onClick={addBuddy}>Follow</button>
+          </div>
+
+          {buddies.length === 0 ? (
+            <p class="hint">Not following anyone.</p>
+          ) : (
+            <table class="table">
+              <thead>
+                <tr><th>Buddy</th><th>Items</th><th>In search</th><th /></tr>
+              </thead>
+              <tbody>
+                {buddies.map((buddy) => (
+                  <tr key={buddy.id}>
+                    <td>{buddy.nickname || '—'} <small>({buddy.id})</small></td>
+                    <td>{buddy.items.toLocaleString()}</td>
+                    <td>
+                      <button class="button button--small" disabled={busy} onClick={() => run(() =>
+                        api.updateBuddy(buddy.id, { isHidden: !buddy.isHidden }))}>
+                        {buddy.isHidden ? 'Hidden' : 'Shown'}
+                      </button>
+                    </td>
+                    <td>
+                      <button class="button button--small" disabled={busy} onClick={() => run(async () => {
+                        await api.removeBuddy(buddy.id);
+                        onToast(`Stopped following ${buddy.nickname || buddy.id}.`);
+                      })}>
+                        Unfollow
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </section>
+      )}
+
+      {authorized && (
+        <section class="settings">
+          <h3>Character backups</h3>
+          <p class="hint">
+            Grim Dawn's own save files, zipped and uploaded while the game is not running. This is
+            the game's data rather than the collection — <code>iagd backup</code> covers the
+            collection.
+          </p>
+
+          {charBackup && !charBackup.available && (
+            <p>No Grim Dawn save folder was found, so there is nothing to back up.</p>
+          )}
+
+          {charBackup?.available && (
+            <div class="field">
+              <button
+                class="button"
+                disabled={busy || charBackup.running || charBackup.pausedForGame}
+                onClick={() => run(async () => {
+                  const result = await api.backupCharactersNow();
+                  onToast(result.error ?? 'Backing up your character saves…');
+                })}
+              >
+                {charBackup.running ? 'Backing up…' : 'Back up now'}
+              </button>
+
+              {/* Why the button is disabled, rather than a dead button and no explanation. */}
+              {charBackup.pausedForGame && (
+                <p class="hint">
+                  Paused while Grim Dawn is running — a save the game is writing cannot be
+                  archived safely. It resumes on its own once you close the game.
+                </p>
+              )}
+
+              {charBackup.message && !charBackup.running && (
+                <p class={charBackup.failed?.length ? 'notice notice--warning' : 'hint'}>
+                  {charBackup.message}
+                  {charBackup.failed?.length ? ` (${charBackup.failed.join(', ')})` : ''}
+                </p>
+              )}
+            </div>
+          )}
+
+          {characters.length === 0 ? (
+            <p class="hint">Nothing backed up yet.</p>
+          ) : (
+            <ul class="list">
+              {characters.map((character) => {
+                const state = downloads[character.name];
+                return (
+                  <li key={character.name}>
+                    <button
+                      class="button button--small"
+                      disabled={state?.message === 'Preparing…'}
+                      onClick={async () => {
+                        // The link is signed and expires in five minutes, so it is fetched on
+                        // the click. That is a round trip to the server, which is long enough
+                        // that a button doing nothing visible reads as broken.
+                        const set = (entry: { message: string; url?: string }) =>
+                          setDownloads((current) => ({ ...current, [character.name]: entry }));
+
+                        set({ message: 'Preparing…' });
+                        try {
+                          const result = await api.characterUrl(character.name);
+                          if (!result.url) {
+                            set({ message: result.error ?? 'No backup for that character.' });
+                          } else if (result.opened) {
+                            set({ message: 'Download started in your browser.' });
+                          } else {
+                            // The host has no desktop session to open it in, so this page is
+                            // being viewed in a browser somewhere else. A link the user clicks
+                            // beats window.open, which a popup blocker stops this long after
+                            // the click that started it.
+                            set({ message: 'Ready:', url: result.url });
+                          }
+                        } catch {
+                          set({ message: 'Could not reach the backup service.' });
+                        }
+                      }}
+                    >
+                      {state?.message === 'Preparing…' ? 'Preparing…' : 'Download'}
+                    </button>{' '}
+                    {character.name}
+                    {state && state.message !== 'Preparing…' && (
+                      <small class="hint">
+                        {' '}— {state.message}
+                        {state.url && (
+                          <>
+                            {' '}
+                            <a href={state.url} target="_blank" rel="noopener noreferrer">
+                              save {character.name}
+                            </a>
+                          </>
+                        )}
+                      </small>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
+      )}
+    </div>
+  );
+}
+
 function SettingsView({ onSaved, progress }: {
   onSaved: (message: string) => void;
   progress: MergeProgressEvent | null;
@@ -1711,19 +2112,7 @@ function App() {
 
         {tab === 'settings' && <SettingsView onSaved={setToast} progress={mergeProgress} />}
 
-        {tab === 'online' && (
-          <div class="tabpage">
-            <h2>Online</h2>
-            <p>
-              Upstream keeps cloud backup and buddy sharing here. Neither is implemented in this
-              port yet, so nothing is being sent anywhere.
-            </p>
-            <p>
-              Your collection lives in one file, and <code>iagd backup</code> copies it. The
-              Settings tab can merge another collection into this one.
-            </p>
-          </div>
-        )}
+        {tab === 'online' && <OnlineView onToast={setToast} />}
 
         {tab === 'grimdawn' && (
           <div class="tabpage">

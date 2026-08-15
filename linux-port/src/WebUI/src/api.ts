@@ -128,6 +128,22 @@ async function json<T>(response: Response): Promise<T> {
 }
 
 /**
+ * Like `json`, but keeps the body on a refusal instead of throwing.
+ *
+ * For endpoints whose failures are things the user did — no backup stored for that character,
+ * already signed in — where the host answers with a status *and* an `error` the panel should
+ * show. Throwing there loses the only sentence worth reading and leaves the UI to invent a
+ * vaguer one.
+ */
+async function jsonOrError<T extends { error?: string }>(response: Response): Promise<T> {
+  try {
+    return (await response.json()) as T;
+  } catch {
+    return { error: `${response.status} ${response.statusText}` } as T;
+  }
+}
+
+/**
  * Search filters, mirroring upstream's ItemSearchRequest.
  *
  * `rarity` is a *display colour*, not the game's tier — Grim Dawn's Legendary is IA's "Epic".
@@ -403,6 +419,69 @@ export const LANGUAGE_NAMES: Record<string, string> = {
   JA: '日本語',
 };
 
+/**
+ * Online backup, as the panel sees it.
+ *
+ * `state` has three values, not two. "unknown" means the service could not be reached — which is
+ * not the same as being logged out, and must not be drawn as one: offering a login button for a
+ * network problem invites someone to re-authenticate over something that will pass by itself.
+ */
+export interface CloudStatus {
+  state: 'authorized' | 'unauthorized' | 'unknown';
+  user: string | null;
+  /** This account's own six-digit id, to hand to a friend. */
+  buddyId: number | null;
+  usingDualComputer: boolean;
+  optOutOfBackups: boolean;
+  liveSyncConnected: boolean;
+  /** Set while a login is waiting for the browser round trip to finish. */
+  pendingLoginUrl: string | null;
+  pendingUploads: number;
+  pendingDeletions: number;
+  /** "cloud" or "localdev". Shown so a development build cannot be mistaken for a real one. */
+  environment: string | null;
+  host: string | null;
+}
+
+export interface Buddy {
+  id: number;
+  nickname: string | null;
+  /** Hidden buddies keep their items but drop out of search results. */
+  isHidden: boolean;
+  items: number;
+  lastSync: number;
+}
+
+export interface BackedUpCharacter {
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * The state of character backup itself, not of any one character.
+ *
+ * Separate from the list because an empty list has several very different causes — no Proton
+ * prefix, the game is open, nothing has changed since the last run — and showing the same blank
+ * space for all of them is what makes a working feature look broken.
+ */
+export interface CharacterBackupState {
+  /** False when no Grim Dawn save folder was found, so there is nothing to back up. */
+  available: boolean;
+  running: boolean;
+  /** Passes are suspended: a save the game is writing cannot be archived safely. */
+  pausedForGame: boolean;
+  lastRunUtc: string | null;
+  message: string | null;
+  /** Names that did not upload. They are retried automatically. */
+  failed: string[] | null;
+}
+
+export interface CharacterBackups {
+  characters: BackedUpCharacter[];
+  backup: CharacterBackupState;
+}
+
 export const api = {
   status: () => fetch('/api/status').then(json<HostStatus>),
 
@@ -531,6 +610,66 @@ export const api = {
   cancelTransfer: (transferId: string) =>
     fetch(`/api/transfers/${transferId}`, { method: 'DELETE' })
       .then(json<{ cancelled: boolean; message: string }>),
+
+  // --- Online backup. Every one of these is inert until the user logs in.
+
+  cloud: () => fetch('/api/cloud').then(json<CloudStatus>),
+
+  /** Starts a login and returns the address to open. The rest happens in the browser. */
+  cloudLogin: () =>
+    fetch('/api/cloud/login', { method: 'POST' })
+      .then(jsonOrError<{ loginUrl?: string; error?: string }>),
+
+  cloudLogout: () =>
+    fetch('/api/cloud/logout', { method: 'POST' }).then(json<{ message: string }>),
+
+  /** Irreversible on the server. The UI asks twice. */
+  cloudDeleteAccount: () =>
+    fetch('/api/cloud/account', { method: 'DELETE' })
+      .then(jsonOrError<{ message?: string; error?: string }>),
+
+  cloudSettings: (settings: { usingDualComputer?: boolean; optOutOfBackups?: boolean }) =>
+    fetch('/api/cloud/settings', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(settings),
+    }).then(json<CloudStatus>),
+
+  buddies: () => fetch('/api/cloud/buddies').then(json<Buddy[]>),
+
+  addBuddy: (id: number, nickname: string) =>
+    fetch('/api/cloud/buddies', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ id, nickname }),
+    }).then(jsonOrError<{ added?: number; error?: string }>),
+
+  updateBuddy: (id: number, changes: { nickname?: string; isHidden?: boolean }) =>
+    fetch(`/api/cloud/buddies/${id}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(changes),
+    }).then(json<{ updated?: number; error?: string }>),
+
+  removeBuddy: (id: number) =>
+    fetch(`/api/cloud/buddies/${id}`, { method: 'DELETE' })
+      .then(json<{ removed: number }>),
+
+  characters: () => fetch('/api/cloud/characters').then(json<CharacterBackups>),
+
+  /** Runs a backup pass now. Returns at once; watch `characters()` for the outcome. */
+  backupCharactersNow: () =>
+    fetch('/api/cloud/characters/backup', { method: 'POST' })
+      .then(jsonOrError<{ started?: boolean; error?: string }>),
+
+  /**
+   * A short-lived link to one character's backup archive, which the host also hands to the
+   * desktop browser — `opened` says whether that worked. It cannot when the host is headless,
+   * and then the page is being viewed in a real browser anyway and can offer the link itself.
+   */
+  characterUrl: (name: string) =>
+    fetch(`/api/cloud/characters/${encodeURIComponent(name)}`)
+      .then(jsonOrError<{ url?: string; opened?: boolean; error?: string }>),
 
   iconUrl: (icon: string | null) => (icon ? `/api/icons/${encodeURIComponent(icon)}` : null),
 };
