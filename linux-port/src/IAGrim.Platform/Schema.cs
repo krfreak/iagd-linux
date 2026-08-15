@@ -102,6 +102,11 @@ public static class Schema {
     /// </summary>
     private static readonly (string Table, string Column, string Type)[] MappedColumns = [
         ("PlayerItem", "AffixRerollsUsed", "INTEGER"),
+        // BuddyItem.hbm.xml declares this too, and AddBaseTables does not create it -- upstream's
+        // buddyitems_v6 gets it the same way PlayerItem does. Missing here it was not merely a
+        // dormant column: buddy sync inserts it by name, so every insert failed and a subscribed
+        // buddy's collection silently stayed empty.
+        ("buddyitems_v6", "AffixRerollsUsed", "INTEGER"),
     ];
 
     /// <summary>

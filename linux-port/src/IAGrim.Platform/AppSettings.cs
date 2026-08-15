@@ -13,10 +13,11 @@ namespace IAGrim.Platform;
 /// needs and preserves everything else.
 ///
 /// Upstream splits its settings into "local" (machine-specific, discarded when the machine name
-/// changes) and "persistent". That split exists to support its cloud sync, which this port does
-/// not have, so there is one flat object here.
+/// changes) and "persistent"; the split exists to support its cloud sync. This port has one flat
+/// object, and <see cref="ICloudSettings"/> records which side of that split each cloud key
+/// belongs to instead.
 /// </summary>
-public sealed class AppSettings {
+public sealed class AppSettings : ICloudSettings {
     /// <summary>
     /// Stash tab to take deposited items from. 0 means the last tab, matching the hook's own
     /// default — see SettingsReader.cpp.
@@ -64,6 +65,33 @@ public sealed class AppSettings {
     /// </summary>
     public bool TransferAnyMod { get; set; }
 
+    // ------------------------------------------------------------------- online sync
+    //
+    // See ICloudSettings for what each of these means and which of upstream's two settings
+    // files it comes from. They live here rather than in a separate file because the settings
+    // file is one document, and a second one would be a second thing to back up.
+
+    /// <inheritdoc />
+    public string? CloudUser { get; set; }
+
+    /// <inheritdoc />
+    public string? CloudAuthToken { get; set; }
+
+    /// <inheritdoc />
+    public long CloudUploadTimestamp { get; set; }
+
+    /// <inheritdoc />
+    public bool UsingDualComputer { get; set; }
+
+    /// <inheritdoc />
+    public long? BuddySyncUserIdV3 { get; set; }
+
+    /// <inheritdoc />
+    public bool OptOutOfBackups { get; set; }
+
+    /// <inheritdoc />
+    public DateTime LastCharSyncUtc { get; set; }
+
     // ---------------------------------------------------------------- persistence
 
     private static readonly JsonSerializerOptions Json = new() {
@@ -103,4 +131,10 @@ public sealed class AppSettings {
         File.WriteAllText(temporary, JsonSerializer.Serialize(this, Json));
         File.Move(temporary, path, overwrite: true);
     }
+
+    /// <summary>
+    /// <see cref="ICloudSettings.Save"/>. Explicit because the public <see cref="Save(string?)"/>
+    /// takes an optional path and so does not implement a parameterless method.
+    /// </summary>
+    void ICloudSettings.Save() => Save();
 }

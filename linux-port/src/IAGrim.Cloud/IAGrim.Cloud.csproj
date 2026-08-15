@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>IAGrim.Cloud</RootNamespace>
+  </PropertyGroup>
+
+  <!--
+    Online backup and buddy sharing: upstream's IAGrim/Backup/Cloud and IAGrim/BuddyShare.
+
+    Its own project rather than a folder in IAGrim.Platform because it is the only part of
+    this port that talks to somebody else's server. Keeping the boundary visible means the
+    HTTP surface can be listed, pinned and tested on its own: see
+    scripts/verify-cloud-protocol.sh and tests/IAGrim.Cloud.Tests.
+
+    Newtonsoft is deliberately *not* referenced even though upstream serialises with it: the
+    two shapes upstream produces (PascalCase for REST, camelCase for the websocket) are
+    reproduced with System.Text.Json in CloudJson, and the tests assert the resulting bytes.
+  -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="10.0.8" />
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../IAGrim.Platform/IAGrim.Platform.csproj" />
+  </ItemGroup>
+
+  <!--
+    So the tests can feed a websocket frame straight into the handler. Applying one without a
+    socket is the only way to test the frames that never arrive over a healthy connection:
+    malformed JSON, an unknown type, an item this machine already holds.
+  -->
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+      <_Parameter1>IAGrim.Cloud.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+</Project>

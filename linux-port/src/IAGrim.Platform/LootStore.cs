@@ -60,13 +60,13 @@ public sealed class LootStore : IDisposable {
                     ModifierRecord, MateriaRecord, RelicCompletionBonusRecord, RelicSeed,
                     EnchantmentRecord, EnchantmentSeed, TransmuteRecord,
                     AscendantAffixNameRecord, AscendantAffix2hNameRecord, AffixRerollsUsed,
-                    StackCount, Name, namelowercase, created_at
+                    StackCount, Name, namelowercase, created_at, cloudid, cloud_hassync
                 ) VALUES (
                     $mod, $hc, $base, $prefix, $suffix, $seed, $rerolls,
                     $modifier, $materia, $relicBonus, $relicSeed,
                     $enchantment, $enchantmentSeed, $transmute,
                     $asc1, $asc2, $affixRerolls,
-                    $stack, $name, $nameLower, $created
+                    $stack, $name, $nameLower, $created, $cloudId, 0
                 );
                 SELECT last_insert_rowid();
                 """;
@@ -95,6 +95,11 @@ public sealed class LootStore : IDisposable {
             // returns TotalMilliseconds. Seconds here would read as 1970 in the Windows tool and
             // would put every item inside the "recent" window.
             command.Parameters.AddWithValue("$created", DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+            // The cloud identity is assigned here rather than at upload time, and regardless of
+            // whether online sync is switched on. See CloudIdentity: an item that reaches another
+            // machine before it has a stable id arrives twice. `cloud_hassync` starts at 0, which
+            // is what marks it as still to upload.
+            command.Parameters.AddWithValue("$cloudId", CloudIdentity.New());
 
             id = (long)command.ExecuteScalar()!;
         }
@@ -354,6 +359,12 @@ public sealed class LootStore : IDisposable {
     /// </summary>
     public bool Delete(long id) {
         using var transaction = _connection.BeginTransaction();
+
+        // Before anything else: if the backup service knows this item, record that it is gone.
+        // The tombstone is what stops the user's other machine uploading it straight back after
+        // the game has taken it -- without it, an item transferred into the stash here reappears
+        // in the collection minutes later and can be transferred a second time.
+        CloudTombstone.Mark(_connection, id, transaction);
 
         // Every table that keys off the item, deleted explicitly.
         //
