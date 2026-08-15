@@ -35,15 +35,39 @@ Loot capture from a running game, the full item search with upstream's filters, 
 and set views, transfers to and from the stash, backups, GD Stash import and export, merging
 another collection in, mod support, and a desktop window with a tray icon.
 
-`linux-port/BACKLOG.md` lists what upstream has that this does not: cloud backup and buddy
-sharing, deferred rather than dropped.
+Online backup, live sync between two PCs and character backup are implemented too — see below.
+Buddy sharing syncs a friend's collection but does not yet show it in the search;
+`linux-port/BACKLOG.md` lists that and everything else upstream has that this does not.
+
+## Online features
+
+Cloud backup, live sync between two machines, and character backup are ported and switched off
+until you log in. Buddy sharing is built as far as the database — a followed friend's items are
+fetched and kept up to date — but the search does not show them yet (BACKLOG entries 1 and 2).
+
+The server is somebody else's, run for free, so the standard is not "sync works" but "sync
+cannot mangle anything":
+
+* the [server is open source][onlinesync], so `linux-port/scripts/build-sync-server.sh` builds a
+  real instance and the test suite runs the whole feature against it **on loopback** — never
+  against `api.iagd.evilsoft.net`. The fixture refuses any host that is not loopback.
+* the request pacing is upstream's, and upstream's is set by the server: cooldowns come from
+  `/logincheck`, downloads stop after 31 idle minutes, batches are the server's own limit of 100.
+* three upstream behaviours are reproduced rather than "fixed", because changing them would take
+  actions against somebody's account that the Windows tool does not take. They are listed in
+  `linux-port/PORTING.md`.
+
+```bash
+cd linux-port
+make test        # builds a local sync server and runs the suite against it
+```
+
+`IAGD_CLOUD_ENV=localdev` (with `IAGD_CLOUD_HOST`) points the app at a server on your own machine.
+
+**Still back up your collection before switching this on.** It is new, and it writes to a
+database that cannot be regenerated.
 
 ## What is left out
-
-I deliberately left out the cloud backup and buddy sharing features, because I don't want to mangle any data on
-the server [marius00](https://github.com/marius00) provides. If you want to use that data, download it to your
-machine and then merge it into your collection here to get access. No warranty of inconsistency between the two
-versions is provided, but it should be fine as long as you don't use the cloud features on this port.
 
 Translations are copied from upstream, but the UI is English-only. The Preact UI is a single-page app and does
 not have a translation framework.
@@ -118,4 +142,5 @@ MIT — see [LICENSE](LICENSE). Item Assistant is MIT © marius00, proton-inject
 JokelBaf; neither is redistributed here.
 
 [iagd]: https://github.com/marius00/iagd
+[onlinesync]: https://github.com/marius00/IAGD-Onlinesync
 [issues]: https://github.com/krfreak/iagd-linux/issues

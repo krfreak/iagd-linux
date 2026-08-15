@@ -12,7 +12,7 @@ APP    := src/IAGrim.App/IAGrim.App.csproj
 HOST   := src/IAGrim.Host/IAGrim.Host.csproj
 CLI    := tools/iagd/iagd.csproj
 
-.PHONY: all ui help favicon icon app cli run host verify package clean
+.PHONY: all ui help favicon icon app cli run host test verify package clean
 
 all: ui app cli
 
@@ -59,6 +59,14 @@ run: ui icon
 host: ui
 	dotnet run --project $(HOST)
 
+# The cloud tests, which need a real backup server on loopback. Builds it on first run.
+# Never points at api.iagd.evilsoft.net: see tests/IAGrim.Cloud.Tests.
+test:
+	@./scripts/build-sync-server.sh >/dev/null
+	dotnet test $(TESTS) -v q --nologo
+
+TESTS := tests/IAGrim.Cloud.Tests/IAGrim.Cloud.Tests.csproj
+
 # Everything that asserts we still match upstream. Run after pulling upstream.
 verify:
 	@./scripts/check-upstream.sh      || true
@@ -71,6 +79,7 @@ verify:
 	@bash ./scripts/verify-search-filters.sh
 	@bash ./scripts/verify-stat-rendering.sh
 	@bash ./scripts/verify-help.sh
+	@bash ./scripts/verify-cloud-protocol.sh
 
 # A relocatable, self-contained package: AppDir + tarball, and an AppImage when appimagetool
 # is installed. See packaging/build-appimage.sh for why this is not a Flatpak.

@@ -1607,3 +1607,155 @@ So the case for adopting NHibernate is weaker now than when it was first decline
 the answers in BACKLOG.md: cloud and buddy sync are both wanted, and both will be built by
 porting the SQL, as everything else here was.
 
+
+## Online backup and buddy sharing
+
+Ported: `IAGrim/Backup/Cloud/`, `IAGrim/BuddyShare/`, `CharacterBackupService`, and the parts of
+`Utilities/Cloud/FileBackup.cs` that feed it. Lives in `src/IAGrim.Cloud`, wired into the host by
+`CloudWorker` and exposed to the UI by `CloudApi`.
+
+**Two pieces of buddy sharing are not here yet**, and they are the visible half: a buddy's items
+are fetched and stored but are not merged into the search, and no tooltips are requested for
+them. See entries 1 and 2 of [BACKLOG.md](BACKLOG.md) — the storage and sync described below are
+complete and tested, the display is not.
+
+This is the only part of this port that talks to somebody else's server. The service is run for
+free by upstream's author, the account is a real one, and a collection can represent years of
+play — so the standard here is not "sync works" but "sync cannot mangle anything", and the way
+that was established is worth stating before the details.
+
+### How this was verified
+
+**The server is open source** (`github.com/marius00/IAGD-Onlinesync`) and the monolith runs
+standalone: MySQL is only a read-only source for an in-progress migration and is skipped when
+`DATABASE_*` is unset. So `scripts/build-sync-server.sh` builds a real instance, and
+`tests/IAGrim.Cloud.Tests` runs the whole feature against it on loopback — the real validation,
+the real SQLite storage, the real login flow, the real websocket hub. `CloudServerFixture`
+refuses any host that is not loopback.
+
+That matters because reading upstream's source and believing it has been wrong here before.
+Three findings in this section came out of *executing* rather than reading, and one of them was a
+bug in this port's schema that no amount of reading would have surfaced.
+
+`scripts/verify-cloud-protocol.sh` does the other half — the endpoint list, the item fields and
+their order, and both directions of `ItemConverter`, all extracted from upstream's source and
+diffed. Behaviour is tested; tables are pinned.
+
+### The two wire formats
+
+Upstream serialises with Newtonsoft and **does not use the same settings for both transports**:
+
+| | REST (`/upload`, `/remove`) | websocket (`/ws`) |
+|---|---|---|
+| casing | `BaseRecord` — declared, i.e. PascalCase | `baseRecord` — camelCase |
+| nulls | written as `null` | omitted |
+| where | `JsonConvert.SerializeObject(items)`, no settings | `_jsonSettings` with a camel-case resolver |
+
+Both work because the Go server decodes with `encoding/json`, which matches struct tags
+case-insensitively — confirmed by posting upstream's exact PascalCase body to a real instance.
+`CloudJson` reproduces both shapes with System.Text.Json and `WireFormatTests` asserts the bytes,
+because "the server accepts it" is a weaker claim than "it is what the Windows tool sends".
+
+### Three upstream behaviours reproduced rather than fixed
+
+Each of these is a place where the obvious improvement would make this port behave differently
+from the tool it is a port of, against a service it does not own. All three are reproduced, and
+all three are written down here so that changing one is a decision rather than a drift.
+
+**1. `PrefixRarity` goes up and never comes back down.** `ItemConverter.ToUpload` sets it, the
+server stores and returns it, and `ToPlayerItem` has no line for it — so an item arriving from
+the cloud lands with a prefix rarity of 0 whatever it had when it left. "At least N rare affixes"
+is a filter over that local column, so a port that filled it in would return items the Windows
+tool does not, on the same collection. Asserted in `ItemConverterTests`.
+
+**2. Logging out does not revoke the token.** `AuthService.Logout` issues a **GET** to
+`/logout`; the service routes that path as a POST, so the request comes back 404 and the token
+stays valid server-side until it expires. Upstream ignores the status and clears the token
+locally regardless, which is why nobody has noticed. Verified against a real instance (`404`).
+Reproduced: taking an action against somebody's account that the Windows tool does not take is
+not a port's call to make. Changing the verb here would be a one-line, deliberate fix.
+
+**3. The shared stash is never uploaded.** `FileBackup.IsStashFilesNewerThan` joins `"Save"` onto
+a path that already ends in `Save`, so it tests `…/Grim Dawn/Save/Save/transfer.gst` and always
+answers false. Every neighbouring method uses the correct path. Reproduced, and pinned by
+`CharacterBackupTests.The_shared_stash_check_looks_where_upstream_looks`, which asserts both
+halves: the file where the game puts it is *not* seen, and the path upstream tests *is*.
+
+### What the schema was missing
+
+`buddyitems_v6.AffixRerollsUsed` was absent. Upstream's `AddBaseTables` does not create it and
+its `HbmSchemaMigration` adds it from `BuddyItem.hbm.xml`, exactly as it does for
+`PlayerItem.AffixRerollsUsed` — which this port already carried. The gap was not a dormant
+column: the buddy insert names it, so **every buddy item insert failed** and a subscribed buddy's
+collection silently stayed empty. Found by the tests, not by reading; fixed in `Schema.cs`
+alongside its `PlayerItem` twin.
+
+### Identity, and why it is assigned early
+
+`PlayerItem.cloudid` is minted when an item is **created**, not when it is uploaded, and
+regardless of whether anyone is logged in — `LootStore.Insert` does it via
+`CloudIdentity.New()`. Upstream moved this for the same reason (`CsvParsingService`): an item
+pushed to another machine over the live socket with no id cannot be deduplicated against the copy
+that follows over REST, and the two arrive as two items. An id on an item that is never uploaded
+costs 32 characters; an item without one that *is* uploaded costs a duplicate.
+
+The mirror of that is `deletedplayeritem_v3`. `LootStore.Delete` writes a tombstone before
+removing the row, for synchronised items only — an item that was never uploaded has nothing to
+delete remotely. Without it, the machine that still holds the item uploads it back and the item
+the player just moved into the stash reappears in the collection, transferable a second time.
+
+### The three loops, and what keeps them quiet
+
+Upstream's pacing is reproduced exactly, because all of it is about not being a burden:
+
+- **cooldowns come from the server**, at `/logincheck`: 54 minutes per operation on one machine;
+  10 s, and 1 s for uploads, for a user who has said they play on two.
+- **downloads freeze after 31 idle minutes.** `/api/items` resets the clock, which is where
+  upstream wires its search box.
+- **downloads run once per session** unless dual-computer is on, since nothing else is adding
+  items.
+- **live sync connects only** when dual-computer is on *and* a token exists.
+- **batches are 100**, which is the server's own limit rather than a tuning choice, pinned
+  against `api/upload/upload.go` by the verify script.
+
+### One deliberate divergence
+
+`CloudItemStore.Delete` clears more tables than upstream's does. Upstream deletes
+`ComputedItemStat`, `ReplicaItem2` and `PlayerItem`, leaving `ReplicaItemRow` and
+`PlayerItemRecord` behind. Those leftovers are not inert here: both parent tables use an INTEGER
+primary key, which SQLite makes a rowid alias and reuses, so the next item to arrive inherits a
+departed item's tooltip lines and records. This port hit that exact bug once already (see
+`LootStore.Delete`) and `Schema.RemoveOrphanedRows` sweeps up after it on every start — so the
+end state is upstream's either way, and deleting the rows inline only closes the window between.
+
+### Character backup, and what the panel can say about it
+
+The pass is suspended while Grim Dawn is running — `CloudWorker` sets that from
+`GameClock.StartTime()` on every tick, which is where upstream watches its injector. Zipping a
+save the game is writing produces a corrupt archive, and a corrupt archive uploaded over a good
+one is the worst outcome available here.
+
+`ExecuteInternal` returns a `CharacterBackupResult` rather than upstream's bare bool. Upstream's
+only consumer is the decision about whether to advance the timestamp; this port also shows the
+outcome, and "backup failed" with no names is a message nobody can act on. The timestamp rule is
+unchanged: it advances only when *everything* succeeded, so a partial run retries the whole set.
+
+The download link is fetched when the button is pressed, not with the list, because it is signed
+and expires in about five minutes. `RequestDownload` keeps the status code so the panel can tell
+apart the two failures that look identical from the outside:
+
+- **404** — there is genuinely no backup of that character.
+- **anything else** — the character is known but the link could not be produced, which is
+  usually temporary.
+
+That distinction is not academic. The server writes the character's row *before* it stores the
+file, so a character can be listed with nothing behind it — verified against a real instance,
+where an upload that fails at the storage step still leaves the name in `GET /character`.
+
+### Developing against something other than production
+
+`CloudUris.Initialize("localdev")` resolves to `http://localhost:8080`, overridable with
+`IAGD_CLOUD_HOST`; the host picks its environment from `IAGD_CLOUD_ENV`, defaulting to `cloud`.
+Upstream has the same branch but leaves it commented out, so its `localdev` falls through to
+production. Here it resolves, because the tests run a real server and pointing them at
+`api.iagd.evilsoft.net` is precisely the thing this feature must never do.

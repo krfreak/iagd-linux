@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>IAGrim.Cloud.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <!--
+    The first test project in this port. Everything else here is checked by scripts/verify-*.sh,
+    which compare *tables* extracted from upstream's source. That works because those are tables.
+    Online sync is behaviour: a batch is uploaded, a timestamp advances, a deletion crosses to a
+    second machine. The interesting failures are round trips, and a shell script comparing text
+    cannot see one.
+
+    So these tests run against a real instance of the server this port talks to
+    (github.com/marius00/IAGD-Onlinesync, built by scripts/build-sync-server.sh) on localhost.
+    Never against api.iagd.evilsoft.net: that account is real, the service is somebody else's,
+    and the whole point is not to send it junk. CloudServerFixture refuses any host that is not
+    loopback.
+
+    scripts/verify-cloud-protocol.sh still does the table half: endpoint paths and field names
+    pinned against upstream's Uris.cs and CloudItemDto.cs.
+  -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <!-- Lets the server-backed tests skip, rather than fail, on a checkout without Go. -->
+    <PackageReference Include="Xunit.SkippableFact" Version="1.4.13" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/IAGrim.Cloud/IAGrim.Cloud.csproj" />
+    <ProjectReference Include="../../src/IAGrim.Platform/IAGrim.Platform.csproj" />
+  </ItemGroup>
+
+</Project>

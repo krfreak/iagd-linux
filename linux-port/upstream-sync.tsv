@@ -68,3 +68,26 @@ HookDll/Hook/OnDemandSeedInfo.cpp	src/IAGrim.Platform/ReplicaService.cs	Replica 
 IAGrim/UI/Tabs/SettingsWindow.cs	src/IAGrim.Platform/AppSettings.cs	The settings a user can actually change; new controls here are new settings to consider
 IAGrim/UI/Controller/dto/JsonSkill.cs	src/IAGrim.Host/Contracts.cs	Granted-skill display fields
 IAGrim/Services/CsvFileMonitor.cs	src/IAGrim.Host/LootImporter.cs	Poll cadence for bridge activity while the game runs
+
+# --- Online backup and buddy sharing. See the section of the same name in PORTING.md.
+#     The wire format is also pinned mechanically by scripts/verify-cloud-protocol.sh; these
+#     entries cover the behaviour around it -- pacing, the sync loops, the file rules.
+IAGrim/Backup/Cloud/Uris.cs	src/IAGrim.Cloud/CloudUris.cs	every URL the backup service exposes
+IAGrim/Backup/Cloud/Dto/CloudItemDto.cs	src/IAGrim.Cloud/Dto/CloudItemDto.cs	the item as it travels, field order included
+IAGrim/Backup/Cloud/Util/ItemConverter.cs	src/IAGrim.Cloud/ItemConverter.cs	stored item <-> wire, including what each direction drops
+IAGrim/Backup/Cloud/Service/AuthService.cs	src/IAGrim.Cloud/AuthService.cs	browser login, the day-long auth cache, logout
+IAGrim/Backup/Cloud/Service/BackupService.cs	src/IAGrim.Cloud/BackupService.cs	the sync loop: cooldowns, batching, the idle freeze
+IAGrim/Backup/Cloud/Service/CloudSyncService.cs	src/IAGrim.Cloud/CloudSyncService.cs	the five item calls
+IAGrim/Backup/Cloud/Service/WebSocketSyncService.cs	src/IAGrim.Cloud/WebSocketSyncService.cs	live sync between a user's own machines
+IAGrim/Backup/Cloud/Service/CharacterBackupService.cs	src/IAGrim.Cloud/CharacterBackupService.cs	character save upload, and its ten-minute cooldown
+IAGrim/Utilities/Cloud/FileBackup.cs	src/IAGrim.Cloud/CharacterBackupService.cs	which save files are eligible, and the size caps
+IAGrim/Utilities/HelperClasses/RestService.cs	src/IAGrim.Cloud/RestService.cs	the HTTP wrapper, including its two quirks
+IAGrim/Utilities/ActionCooldown.cs	src/IAGrim.Cloud/Pacing.cs	"at most every N ms", starting ready
+IAGrim/Backup/BatchUtil.cs	src/IAGrim.Cloud/Pacing.cs	batches of 100, the server's own limit
+IAGrim/BuddyShare/BuddyItemsService.cs	src/IAGrim.Cloud/BuddyItemsService.cs	the per-buddy fetch loop and its cooldowns
+IAGrim/Database/DAO/BuddyItemDaoImpl.cs	src/IAGrim.Cloud/Data/BuddyStore.cs	buddy item storage and the orphan sweeps
+IAGrim/Database/Model/BuddyItem.hbm.xml	src/IAGrim.Platform/Schema.cs	buddyitems_v6 columns, incl. AffixRerollsUsed
+# Tracked because BACKLOG entry 1 is wanted, not because it is ported: this is where upstream
+# merges a buddy's items into the search results. Nothing here reproduces it yet.
+IAGrim/UI/Controller/SearchController.cs	src/IAGrim.Host/CollectionService.cs	BACKLOG 1: merging buddy items into search results
+IAGrim/UI/Tabs/OnlineSettings.cs	src/IAGrim.Host/CloudApi.cs	what logging out and deleting an account throw away
