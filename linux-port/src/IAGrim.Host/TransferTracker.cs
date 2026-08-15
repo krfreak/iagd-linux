@@ -42,6 +42,15 @@ public sealed class TransferTracker {
         _databasePath = databasePath ?? LinuxPaths.DatabaseFile;
     }
 
+    /// <summary>
+    /// Called after the game has taken an item and the row is gone.
+    ///
+    /// Online sync uses it to push the deletion to the user's other machines immediately. That
+    /// ordering matters more than it looks: until the other machine knows, it still offers the
+    /// item, and transferring it there too puts a second copy in the game.
+    /// </summary>
+    public Action? OnItemTakenByGame { get; set; }
+
     public IReadOnlyCollection<PendingTransfer> Pending => _pending.Values.ToArray();
 
     public PendingTransfer Queue(LootedItem item, long itemId, int timeoutSeconds,
@@ -88,8 +97,14 @@ public sealed class TransferTracker {
                 _pending.TryRemove(record.TransferId, out _);
 
                 using (var store = new LootStore(_databasePath)) {
+                    // Writes the tombstone as well as removing the row -- see LootStore.Delete.
                     store.Delete(record.ItemId);
                 }
+
+                // The tombstone now exists, so the push can read it. A no-op unless live sync is
+                // connected; the regular deletion sync carries it otherwise.
+                try { OnItemTakenByGame?.Invoke(); }
+                catch (Exception ex) { Console.Error.WriteLine($"live sync push failed: {ex.Message}"); }
 
                 await _events.BroadcastAsync(new HostEvent("transferCompleted", new {
                     transferId = record.TransferId,

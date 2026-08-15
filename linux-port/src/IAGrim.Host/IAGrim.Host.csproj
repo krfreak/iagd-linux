@@ -28,6 +28,7 @@
   <ItemGroup>
     <ProjectReference Include="../IAGrim.Platform/IAGrim.Platform.csproj" />
     <ProjectReference Include="../IAGrim.Core/IAGrim.Core.csproj" />
+    <ProjectReference Include="../IAGrim.Cloud/IAGrim.Cloud.csproj" />
   </ItemGroup>
 
 </Project>

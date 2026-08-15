@@ -26,10 +26,20 @@ public sealed class ApiRouter {
     private readonly TransferTracker? _transfers;
     private readonly HostServer? _server;
 
+    /// <summary>
+    /// Online sync, when it is running. Null in a host built without it — the CLI's own
+    /// short-lived host, and anything started before a collection database exists — in which case
+    /// the endpoints answer 503 rather than pretending to be logged out.
+    /// </summary>
+    private readonly CloudApi? _cloud;
+
+    private static readonly object CloudUnavailable = new { error = "online sync is not running" };
+
     public ApiRouter(CollectionService collection, CollectionViewService views, EventHub events,
                      SteamPaths? paths, PrefixBridge? bridge, TransferTracker? transfers,
-                     HostServer? server = null) {
+                     HostServer? server = null, CloudApi? cloud = null) {
         _server = server;
+        _cloud = cloud;
         _collection = collection;
         _views = views;
         _events = events;
@@ -67,6 +77,10 @@ public sealed class ApiRouter {
                 return;
 
             case ("GET", "/api/items"): {
+                // Upstream wires its search box to the same call. It is what keeps downloads
+                // alive: after 31 minutes without a search the client is considered idle and
+                // stops polling until someone looks at it again.
+                _server?.Cloud?.OnSearch();
                 await Json_(context, _collection.Search(Branch(ParseItemQuery(query)),
                                                         ParseInt(query["skip"], 0),
                                                         ParseInt(query["take"], 100)));
@@ -269,19 +283,10 @@ public sealed class ApiRouter {
                     return;
                 }
 
-                try {
-                    using var opener = System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo {
-                        FileName = "xdg-open",
-                        ArgumentList = { url },
-                        UseShellExecute = false,
-                    });
-                    await Json_(context, new { opened = opener is not null });
-                }
-                catch (Exception ex) {
-                    // No xdg-open, or no desktop session: the page falls back to opening it
-                    // itself, and shows the address either way.
-                    await Json_(context, new { opened = false, error = ex.Message });
-                }
+                // No xdg-open, or no desktop session: the page falls back to opening it
+                // itself, and shows the address either way.
+                var opened = DesktopBrowser.Open(url, out var openError);
+                await Json_(context, new { opened, error = openError });
                 return;
             }
 
@@ -297,6 +302,91 @@ public sealed class ApiRouter {
 
                 _ = _server?.GameData?.StartAsync(directory, settings.Language, cancellationToken);
                 await Json_(context, new { started = true, gameDir = directory });
+                return;
+            }
+
+            // ------------------------------------------------------------- online sync
+            //
+            // The panel behind these is upstream's "Backups" tab. Everything with consequences
+            // lives in CloudWorker; these only expose it.
+
+            case ("GET", "/api/cloud"):
+                if (_cloud is null) { await Json_(context, CloudUnavailable, 503); return; }
+                await Json_(context, _cloud.Status());
+                return;
+
+            case ("POST", "/api/cloud/login"):
+                if (_cloud is null) { await Json_(context, CloudUnavailable, 503); return; }
+                await Json_(context, _cloud.Login());
+                return;
+
+            case ("POST", "/api/cloud/logout"):
+                if (_cloud is null) { await Json_(context, CloudUnavailable, 503); return; }
+                await Json_(context, _cloud.Logout());
+                return;
+
+            // Deleting the online backup is irreversible on the server, so it is a DELETE on its
+            // own path rather than a flag on something else: nothing reaches it by accident.
+            case ("DELETE", "/api/cloud/account"):
+                if (_cloud is null) { await Json_(context, CloudUnavailable, 503); return; }
+                await Json_(context, _cloud.DeleteAccount());
+                return;
+
+            case ("PUT", "/api/cloud/settings"): {
+                if (_cloud is null) { await Json_(context, CloudUnavailable, 503); return; }
+                var update = await ReadJsonAsync<CloudSettingsRequest>(context) ?? new CloudSettingsRequest();
+                await Json_(context, _cloud.UpdateSettings(update.UsingDualComputer, update.OptOutOfBackups));
+                return;
+            }
+
+            case ("GET", "/api/cloud/buddies"):
+                if (_cloud is null) { await Json_(context, CloudUnavailable, 503); return; }
+                await Json_(context, _cloud.Buddies());
+                return;
+
+            case ("POST", "/api/cloud/buddies"): {
+                if (_cloud is null) { await Json_(context, CloudUnavailable, 503); return; }
+                var buddy = await ReadJsonAsync<BuddyRequest>(context);
+                if (buddy is null || buddy.Id <= 0) { await Json_(context, new { error = "no buddy id given" }, 400); return; }
+                var result = _cloud.AddBuddy(buddy.Id, buddy.Nickname);
+                await Json_(context, result, HasError(result) ? 400 : 200);
+                return;
+            }
+
+            case ("PUT", _) when path.StartsWith("/api/cloud/buddies/")
+                                 && long.TryParse(path["/api/cloud/buddies/".Length..], out var buddyToUpdate): {
+                if (_cloud is null) { await Json_(context, CloudUnavailable, 503); return; }
+                var buddy = await ReadJsonAsync<BuddyRequest>(context) ?? new BuddyRequest();
+                var result = _cloud.UpdateBuddy(buddyToUpdate, buddy.Nickname, buddy.IsHidden);
+                await Json_(context, result, HasError(result) ? 404 : 200);
+                return;
+            }
+
+            case ("DELETE", _) when path.StartsWith("/api/cloud/buddies/")
+                                    && long.TryParse(path["/api/cloud/buddies/".Length..], out var buddyToRemove):
+                if (_cloud is null) { await Json_(context, CloudUnavailable, 503); return; }
+                await Json_(context, _cloud.RemoveBuddy(buddyToRemove));
+                return;
+
+            case ("GET", "/api/cloud/characters"):
+                if (_cloud is null) { await Json_(context, CloudUnavailable, 503); return; }
+                await Json_(context, _cloud.Characters());
+                return;
+
+            // Backs up now rather than on the ten-minute timer. Returns at once; the outcome
+            // arrives through GET /api/cloud/characters.
+            case ("POST", "/api/cloud/characters/backup"): {
+                if (_cloud is null) { await Json_(context, CloudUnavailable, 503); return; }
+                var result = _cloud.BackupCharactersNow();
+                await Json_(context, result, HasError(result) ? 409 : 202);
+                return;
+            }
+
+            case ("GET", _) when path.StartsWith("/api/cloud/characters/"): {
+                if (_cloud is null) { await Json_(context, CloudUnavailable, 503); return; }
+                var name = Uri.UnescapeDataString(path["/api/cloud/characters/".Length..]);
+                var result = _cloud.CharacterUrl(name);
+                await Json_(context, result, HasError(result) ? 404 : 200);
                 return;
             }
 
@@ -652,6 +742,13 @@ public sealed class ApiRouter {
                                         .Select(f => f!)
                                         .ToList(),
         };
+
+    /// <summary>
+    /// Whether a handler answered with an error. The cloud handlers return anonymous objects
+    /// describing what happened rather than throwing, so the status code is decided here.
+    /// </summary>
+    private static bool HasError(object result) =>
+        result.GetType().GetProperty("error")?.GetValue(result) is not null;
 
     private static bool? ParseBool(string? value) =>
         value is null ? null : value is "1" or "true" or "True";

@@ -80,12 +80,32 @@ public sealed class HostServer : IAsyncDisposable {
     /// <summary>Reads Grim Dawn's data when asked, and when it has gone stale.</summary>
     public GameDataRefresh? GameData { get; private set; }
 
+    /// <summary>
+    /// Online backup, buddy sharing and live sync. Present from <see cref="Start"/> onwards
+    /// regardless of whether anyone is logged in.
+    /// </summary>
+    public CloudWorker? Cloud { get; private set; }
+
     public void Start() {
         var collection = new CollectionService(LinuxPaths.DatabaseFile);
         var views = new CollectionViewService(LinuxPaths.DatabaseFile);
         var events = new EventHub();
         var transfers = Bridge is null ? null : new TransferTracker(Bridge, events);
-        var api = new ApiRouter(collection, views, events, Paths, Bridge, transfers, this);
+
+        // Online sync. Constructed whether or not anyone is logged in: every loop inside it is a
+        // no-op without a token, and building it lazily would mean a login that does not take
+        // effect until the next start.
+        Cloud = new CloudWorker(LinuxPaths.DatabaseFile, Settings, events, Paths);
+        Cloud.Start();
+
+        // An item the game has just taken is pushed to the user's other machines straight away,
+        // rather than waiting for the next deletion window.
+        if (transfers is not null) {
+            transfers.OnItemTakenByGame = Cloud.OnItemsTransferredToGame;
+        }
+
+        var api = new ApiRouter(collection, views, events, Paths, Bridge, transfers, this,
+                                new CloudApi(Cloud, Settings));
 
         _listener.Start();
         AutoAttach = Bridge is null ? null : new AutoAttachService(Bridge);
@@ -170,6 +190,10 @@ public sealed class HostServer : IAsyncDisposable {
         if (_requestLoop is not null) {
             try { await _requestLoop; } catch (OperationCanceledException) { }
         }
+
+        // After the request loop, so an in-flight cloud request finishes rather than being cut
+        // off mid-upload with the items left marked unsynchronised.
+        Cloud?.Dispose();
 
         _listener.Close();
         _shutdown.Dispose();

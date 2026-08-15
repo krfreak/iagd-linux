@@ -176,6 +176,21 @@ public sealed record TransferRequest(int TimeoutSeconds = 120, bool Keep = false
 public sealed record TransferResult(bool Collected, string Message, string? QueuedPath);
 
 /// <summary>
+/// The two online-sync switches. Both are nullable so a request can change one without
+/// restating the other, which is what a checkbox in the panel sends.
+/// </summary>
+/// <param name="UsingDualComputer">
+/// "I play on more than one PC". Selects the faster cooldowns and enables live sync; it
+/// multiplies how often this client talks to the backup service, so it is opt-in.
+/// </param>
+/// <param name="OptOutOfBackups">Switch every online feature off and stop asking.</param>
+public sealed record CloudSettingsRequest(bool? UsingDualComputer = null, bool? OptOutOfBackups = null);
+
+/// <param name="Id">The buddy's six-digit id. Not a local row id.</param>
+/// <param name="IsHidden">Keep their items but drop them out of search results.</param>
+public sealed record BuddyRequest(long Id = 0, string? Nickname = null, bool? IsHidden = null);
+
+/// <summary>
 /// Pushed over the WebSocket. Mirrors upstream's IOMessageType in spirit: a small closed
 /// set of event kinds the UI switches on.
 /// </summary>
