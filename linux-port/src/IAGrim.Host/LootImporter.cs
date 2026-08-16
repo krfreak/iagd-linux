@@ -32,6 +32,12 @@ internal static class LootImporter {
         // how the same twenty items ended up being asked for every two seconds.
         var replicas = new ReplicaService(bridge);
 
+        // The hook's own channel. Emptied every pass because nothing else does: these files are
+        // written by the DLL and never cleaned up, and an install that has been used for a few
+        // days accumulates hundreds. See HookMessageQueue.
+        var messages = new HookMessageQueue(bridge);
+        var firstDrain = true;
+
         // The last state the UI was told about. Everything the header shows — the game starting,
         // the hook attaching, the collection growing — changes while nobody is making requests,
         // and a page that asked once at load would go on saying "Grim Dawn is not running" for
@@ -48,6 +54,19 @@ internal static class LootImporter {
                 }
 
                 var startedAt = gameStartTime();
+
+                // Before anything else, so a backlog cannot grow while a slow pass runs.
+                //
+                // Drained silently. Nothing here acts on them: the attach path reads the hook's
+                // verdict from the .ABORTED marker synchronously, and reports an attach itself.
+                // Announcing them would mean announcing the past — the first pass on an existing
+                // install clears everything the hook ever wrote, which on this machine was 522
+                // files, 60 of them "hooked successfully" from sessions weeks ago.
+                var drained = messages.Drain().Count;
+                if (firstDrain && drained > 0) {
+                    Console.WriteLine($"cleared {drained} message(s) left in the bridge by earlier sessions");
+                }
+                firstDrain = false;
 
                 // Attach the hook when the game shows up. Paced inside the service: one attempt
                 // at a time, and a growing quiet period rather than a retry every two seconds.

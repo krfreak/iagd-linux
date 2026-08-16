@@ -9,6 +9,15 @@
 
   <ItemGroup>
     <!--
+      The attach pacing has two seams that exist only for tests — an injectable clock and the
+      minimum game age — because the alternative is a test suite that waits 45 real seconds per
+      case, which is a suite nobody runs. Internal rather than public so they stay seams.
+    -->
+    <InternalsVisibleTo Include="IAGrim.Platform.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!--
       Microsoft.Data.Sqlite pulls SQLitePCLRaw.lib.e_sqlite3 2.1.11, which carries a known
       high-severity advisory (GHSA-2m69-gcr7-jv3q). Use the Core package plus an explicit
       current bundle instead - the same combination upstream's IAGrim.csproj uses.

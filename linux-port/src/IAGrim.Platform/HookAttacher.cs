@@ -106,7 +106,18 @@ public class HookAttacher {
         // The script waits forever by default, retrying every 5 s until the game accepts. That
         // is right for a person watching a terminal and wrong here: this runs on a timer, so it
         // must come back and let the loop decide whether to try again.
-        startInfo.Environment["ATTACH_TIMEOUT_MS"] = "8000";
+        //
+        // Short, and that is deliberate. The injector fires at the first window of class
+        // "Grim Dawn" it sees, so a long wait leaves an armed injector parked in the background,
+        // outliving the observation that started it. If the game exits and is relaunched while
+        // one is parked, it injects into a process that is a second old — the worst possible
+        // moment, and the one the minimum-age gate in AutoAttachService exists to avoid.
+        // An attach must not be able to outlive the poll that decided on it.
+        //
+        // 1.5 s is enough to absorb Proton's startup jitter and nothing more: by the time the
+        // host attaches at all, the game has been running for MinimumGameAge and its window has
+        // existed for most of that. No window by now means no window, so come back and re-decide.
+        startInfo.Environment["ATTACH_TIMEOUT_MS"] = "1500";
 
         // No retrying inside the injector: one attempt per call, and AutoAttachService decides
         // when to try again. The injector's own loop turned a single attach into twenty

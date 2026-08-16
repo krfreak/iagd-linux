@@ -825,22 +825,11 @@ public sealed class ApiRouter {
 }
 
 /// <summary>
-/// Under Wine the process name is the loader, so Grim Dawn only shows up in the command
-/// line — hence scanning /proc rather than matching on process name.
+/// Kept as the host's name for "when did the running game start", but the detection itself
+/// lives in <see cref="GameProcess"/> — the attach path in IAGrim.Platform has to agree with
+/// it exactly, and two copies of that rule is how the injector came to be mistaken for the
+/// game in the first place.
 /// </summary>
 internal static class GameClock {
-    public static DateTime? StartTime() {
-        DateTime? earliest = null;
-        foreach (var dir in Directory.EnumerateDirectories("/proc")) {
-            if (!int.TryParse(Path.GetFileName(dir), out var pid)) continue;
-            try {
-                if (!File.ReadAllText(Path.Combine(dir, "cmdline"))
-                         .Contains("Grim Dawn.exe", StringComparison.OrdinalIgnoreCase)) continue;
-                var start = System.Diagnostics.Process.GetProcessById(pid).StartTime;
-                if (earliest is null || start < earliest) earliest = start;
-            }
-            catch { /* exited mid-scan */ }
-        }
-        return earliest;
-    }
+    public static DateTime? StartTime() => GameProcess.StartTime();
 }

@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>IAGrim.Platform.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <!--
+    The attach path, which is the one thing here that can take a play session down with it.
+
+    It resisted testing for the usual reason: every part of it needs a running Grim Dawn, a
+    Proton prefix and a DLL to inject. What these cover is the part that does not — when an
+    attempt is made, and against what evidence. That is where the crashes came from: not a bad
+    injection, but a correct injection fired at the wrong moment, over and over.
+
+    The end-to-end half stays manual and is written up in PORTING.md, because "the game did not
+    crash" cannot be asserted in a unit test.
+  -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/IAGrim.Platform/IAGrim.Platform.csproj" />
+  </ItemGroup>
+
+</Project>

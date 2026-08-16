@@ -71,7 +71,7 @@ set -- ${ARGS[@]+"${ARGS[@]}"}
 
 warn_if_wine_mode_disabled
 
-if ! pgrep -f "Grim Dawn.exe" >/dev/null 2>&1; then
+if [ -z "$(game_pids)" ]; then
     echo "warning: no Grim Dawn process visible from Linux right now." >&2
     echo "         The injector will wait for one to appear." >&2
     echo >&2

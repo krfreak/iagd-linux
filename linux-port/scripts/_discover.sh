@@ -83,6 +83,26 @@ warn_if_wine_mode_disabled() {
 
 to_windows_path() { echo "Z:$(realpath "$1" | sed 's#/#\\#g')"; }
 
+# Pids of the running Grim Dawn, and of nothing else.
+#
+# `pgrep -f "Grim Dawn.exe"` on its own is not that. We launch the injector as
+#   proton run injector64.exe ... --attach-window "Grim Dawn" --attach-name "Grim Dawn.exe"
+# so while an attach is in flight three processes carry the game's name in their command line:
+# the Proton wrapper, wine's steam.exe, and the injector. Measured with no game running:
+# zero matches before an attach, three during it.
+#
+# Same rule as GameProcess.IsGameCommandLine() in IAGrim.Platform; the two must agree.
+game_pids() {
+    local p cmd
+    for p in $(pgrep -f "Grim Dawn.exe" 2>/dev/null); do
+        cmd="$(tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null)" || continue
+        case "$cmd" in
+            *injector64.exe*|*--attach-name*|*--attach-window*) continue ;;
+        esac
+        echo "$p"
+    done
+}
+
 # Earliest start time (epoch seconds) of any running Grim Dawn process, or empty if none.
 # Used to decide whether a hook marker belongs to the CURRENT game session: markers record
 # a Wine pid, which is meaningless to Linux, so age relative to the game is the only
@@ -90,7 +110,7 @@ to_windows_path() { echo "Z:$(realpath "$1" | sed 's#/#\\#g')"; }
 game_start_epoch() {
     local now oldest="" secs
     now=$(date +%s)
-    for p in $(pgrep -f "Grim Dawn.exe" 2>/dev/null); do
+    for p in $(game_pids); do
         secs=$(ps -o etimes= -p "$p" 2>/dev/null | tr -d ' ')
         [ -z "$secs" ] && continue
         local started=$(( now - secs ))

@@ -1477,6 +1477,73 @@ case upstream calls out in `ArzParser.IsInteresting` — Lokarr's Spoils lives u
 
 Measured: **3,504 collection entries, 200 sets.**
 
+## Attaching the hook without killing the game
+
+Upstream injects on Windows, into a process it can ask questions about, from a host in the same
+session. None of that survives the port, and the replacement had a defect that took several play
+sessions down before it was understood. It is written up here because the failure was invisible
+from the code: everything looked correct, and the game died anyway.
+
+**The DLL cannot refuse early enough to protect itself.** `ProcessAttach` decides whether the
+game is hookable by resolving `game.dll`'s exports and dereferencing `gGameEngine` to call
+`IsGameLoading` / `IsGameWaiting` / `IsGameEngineOnline`. All of that happens *after* the module
+is mapped, on an injected remote thread, while the game's main thread may still be constructing
+that engine. During the initial load it is a race. It usually survives. Sometimes the game dies,
+and every crash report collected here ends in the same place — immediately after
+`Renderer Initialized: direct3d11`, before the main menu.
+
+So the abort path is not a safety net, it is a best effort, and **the only real protection is not
+attempting yet**. The attach script waits for the game's *window*, which under Proton exists
+seconds into startup — far too early to be a gate. `AutoAttachService.MinimumGameAge` is the gate
+instead: 45 s, which no character load can beat and which therefore costs nothing, and which puts
+the entire crash window out of reach.
+
+The evidence that this was happening at all came from the bridge, not from the logs. The hook
+writes a `TYPE_INJECTION_CANCELLED` message on every refusal, and those files had never been
+consumed: **391 refusals against 12 successful attaches** across a few days of ordinary use, one
+every eight seconds for as long as a player sat in character select. Each is a full DLL load into
+a live game.
+
+### The injector looked exactly like the game
+
+`GameProcess.IsGameCommandLine` excludes our own injector, and the reason is worth keeping.
+
+Both the host and the attach script answered "is Grim Dawn running" by looking for
+`Grim Dawn.exe` in a process command line. The attach script runs
+
+```
+proton run injector64.exe … --attach-window "Grim Dawn" --attach-name "Grim Dawn.exe"
+```
+
+which puts the game's name into the command line of three processes that are not the game: the
+Proton wrapper, wine's `steam.exe`, and the injector itself. Measured with no game running: zero
+matches before an attach, three during it.
+
+Both detectors took the *earliest* match, so with a real game running the answer stayed right —
+which is why this survived so long. It was wrong only in the gap between sessions, where it made
+"the game is running" true when it was not, and armed an attach against nothing. An injector left
+waiting for a window fires at the first one that appears, which is a newly launched game at its
+most fragile moment. `HookAttacher` now gives it 1.5 s rather than 8 s for exactly that reason:
+an attach must not outlive the observation that started it.
+
+`game_pids()` in `scripts/_discover.sh` is the same rule for the shell half, and the two have to
+stay in agreement.
+
+### What is verified, and what cannot be
+
+`tests/IAGrim.Platform.Tests` pins when an attempt is made and against what evidence — that a
+game seconds old is never touched, that refusals back off and stay bounded, that a live hook is
+never injected twice, and that our own injector is not mistaken for the game (using command lines
+captured from `/proc`). Those tests were checked against the old behaviour and fail on it.
+
+"The game did not crash" is not assertable in a test suite. That half stays manual: launch the
+game with the client already running, confirm nothing is injected during the load, load a
+character, confirm the hook goes live and loot is captured.
+
+**One interaction to know about.** `tools/probe` consumes `linuxhack/*.msg` too. Now that the host
+drains them, the two compete — run the probe against a host that is not running, or expect it to
+see only what it wins the race for.
+
 ## The seed engine
 
 `src/IAGrim.Core/ItemStats/` is upstream's seed-stat engine, copied essentially verbatim. It
