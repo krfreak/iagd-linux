@@ -29,7 +29,8 @@ public class BackupServiceTests {
         _account = server.NewAccount();
     }
 
-    private Machine NewMachine(bool dualPc = true) => new(_account, dualPc);
+    private Machine NewMachine(bool dualPc = true, bool realCooldowns = false) =>
+        new(_account, dualPc, realCooldowns);
 
     /// <summary>
     /// A machine: its own collection database, its own settings, and a backup service logged
@@ -41,7 +42,12 @@ public class BackupServiceTests {
         public BackupService Backup { get; }
         public List<long> Uploaded { get; } = [];
 
-        public Machine((string Email, string Token) account, bool dualPc = true) {
+        private readonly bool _realCooldowns;
+        private bool _shrunk;
+
+        public Machine((string Email, string Token) account, bool dualPc = true,
+                       bool realCooldowns = false) {
+            _realCooldowns = realCooldowns;
             Settings = new TestSettings {
                 CloudUser = account.Email,
                 CloudAuthToken = account.Token,
@@ -59,14 +65,34 @@ public class BackupServiceTests {
         }
 
         /// <summary>
-        /// Runs the loop the way the worker thread does. Cooldowns are the server's real ones,
-        /// so this sleeps between passes rather than spinning.
+        /// One pass of the loop the worker thread runs, after which the fetched cooldowns are
+        /// replaced with one-second ones — see <see cref="FastCooldowns"/>. The first pass is
+        /// what fetches them, so the real values are exercised either way; what goes is the
+        /// waiting, which is all the ten-second deletion and download windows cost a test.
+        /// </summary>
+        /// <param name="search">
+        /// False for a client nobody is looking at — the idle clock is what freezes downloads.
+        /// </param>
+        public void Execute(bool search = true) {
+            if (search) Backup.OnSearch();
+            Backup.Execute();
+            if (!_realCooldowns && !_shrunk) _shrunk = FastCooldowns.TryApply(Backup);
+        }
+
+        /// <summary>Sleeps a whole server-side second: its timestamps have no finer resolution.</summary>
+        public void Wait() =>
+            Thread.Sleep(_realCooldowns ? 1100 : FastCooldowns.PumpIntervalMs);
+
+        /// <summary>
+        /// The trailing wait is not slack. Dropping it — on the theory that the caller asserts
+        /// as soon as this returns — cost nothing measurable (1 m 58 s against 1 m 55 s) and made
+        /// An_item_transferred_into_the_game_disappears_from_the_other_machine fail: the second
+        /// machine pumps straight after the first, and what separates their passes is this sleep.
         /// </summary>
         public void Pump(int passes = 3) {
             for (var i = 0; i < passes; i++) {
-                Backup.OnSearch();          // downloads freeze after 31 idle minutes
-                Backup.Execute();
-                Thread.Sleep(1100);         // the fastest server cooldown is one second
+                Execute();
+                Wait();
             }
         }
 
@@ -80,15 +106,38 @@ public class BackupServiceTests {
         public bool PumpUntil(Func<bool> done, int seconds = 25) {
             var deadline = DateTime.UtcNow.AddSeconds(seconds);
             while (DateTime.UtcNow < deadline) {
-                Backup.OnSearch();
-                Backup.Execute();
+                Execute();
                 if (done()) return true;
-                Thread.Sleep(1100);
+                Wait();
             }
             return done();
         }
 
         public void Dispose() => Collection.Dispose();
+    }
+
+    /// <summary>
+    /// The client obeys the numbers the server hands out, rather than any of its own.
+    ///
+    /// Every other test here replaces them with one-second windows so it does not have to wait
+    /// (<see cref="FastCooldowns"/>), which leaves exactly one thing unguarded: a regression
+    /// where the client stops taking the server's limits seriously and hammers a service run for
+    /// free. That the windows then *gate* anything is <see cref="PacingTests"/>'s job and needs
+    /// no server, so this asserts the wiring and stays fast.
+    /// </summary>
+    [SkippableFact]
+    public void The_cooldowns_the_server_hands_out_are_the_ones_the_client_uses() {
+        using var machine = NewMachine(realCooldowns: true);
+
+        machine.Pump(passes: 1);
+
+        var multiUsage = FastCooldowns.WindowsOf(machine.Backup, "MultiUsage");
+        var regular = FastCooldowns.WindowsOf(machine.Backup, "Regular");
+
+        // logincheck.go: 10 s deletion, 1 s upload, 10 s download for a dual-computer user;
+        // 54 minutes across the board for everyone else.
+        Assert.Equal((10000L, 1000L, 10000L), multiUsage);
+        Assert.Equal((3240000L, 3240000L, 3240000L), regular);
     }
 
     [SkippableFact]
@@ -235,10 +284,12 @@ public class BackupServiceTests {
         var backup = new BackupService(auth, recorder, machine.Settings);
 
         var deadline = DateTime.UtcNow.AddSeconds(25);
+        var shrunk = false;
         while (DateTime.UtcNow < deadline && recorder.Store.GetItemsMarkedForOnlineDeletion().Count > 0) {
             backup.OnSearch();
             backup.Execute();
-            Thread.Sleep(1100);
+            if (!shrunk) shrunk = FastCooldowns.TryApply(backup);
+            Thread.Sleep(FastCooldowns.PumpIntervalMs);
         }
 
         Assert.Empty(recorder.Store.GetItemsMarkedForOnlineDeletion());
@@ -286,7 +337,11 @@ public class BackupServiceTests {
     /// </summary>
     [SkippableFact]
     public void A_locally_deleted_item_is_not_downloaded_back() {
-        using var machine = NewMachine();
+        // Real cooldowns, and they are the point: this needs a *pending* tombstone, and what
+        // keeps it pending is the ten-second deletion window not having come round again. With
+        // the shrunk ones the deletion goes out first and there is nothing left to skip on the
+        // way down — the test would pass or fail on a race rather than on the behaviour.
+        using var machine = NewMachine(realCooldowns: true);
 
         var id = machine.Collection.AddLootedItem("Doomed Revolver");
         machine.Pump();
@@ -341,17 +396,17 @@ public class BackupServiceTests {
             typeof(BackupService)
                 .GetField("_lastSearchDt", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
                 .SetValue(idle.Backup, DateTimeOffset.UtcNow.AddMinutes(-45));
-            idle.Backup.Execute();
-            Thread.Sleep(1100);
+            idle.Execute(search: false);
+            idle.Wait();
         }
 
         Assert.Equal(0, idle.Collection.CountItems());
 
         // But an item looted while idle still goes up.
         idle.Collection.AddLootedItem("Backed Up Anyway");
-        idle.Backup.Execute();
-        Thread.Sleep(1100);
-        idle.Backup.Execute();
+        idle.Execute(search: false);
+        idle.Wait();
+        idle.Execute(search: false);
         Assert.Empty(idle.Collection.Store.GetUnsynchronizedItems());
     }
 

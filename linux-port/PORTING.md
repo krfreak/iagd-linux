@@ -1807,6 +1807,46 @@ bug in this port's schema that no amount of reading would have surfaced.
 their order, and both directions of `ItemConverter`, all extracted from upstream's source and
 diffed. Behaviour is tested; tables are pinned.
 
+### What the suite waits for, and what it stopped waiting for
+
+Driving real services against a real server means some waiting is inherent, and exactly one kind
+is: the server stamps items with `time.Now().Unix()` and serves downloads with `WHERE ts > ?`, so
+**one second is the finest spacing at which a download means anything**. A suite paced faster
+than that would not be a quicker version of this one, it would be a differently-behaved one that
+fails at random.
+
+Almost none of the seven and a half minutes this used to take was that.
+
+**Registering an account cost ten seconds, and three classes register one per test** — buddy
+sharing registers two. `/login` writes the pin-code row and *then* sends the code through AWS
+SES; with no credentials and no SES to reach, that call sits there until it gives up, and the
+fixture waited for the response. It never needed to: the row is committed before the mail attempt
+starts. The request is now fired with a 500 ms timeout and the pin polled out of the server's own
+`core.db`, leaving the server to finish failing to send an e-mail on its own time, to nobody.
+
+**The client's cooldowns are shrunk to one second after the first pass.** They come from
+`/logincheck` and are real — 10 s between deletion passes, 10 s between downloads, 1 s between
+uploads for a dual-computer user — so a test that waits for a deletion to cross waits ten
+seconds. Fetching and applying them is behaviour worth exercising, so `FastCooldowns` replaces
+them only *after* the first `Execute` has been through the real path, and only with one-second
+windows, for the reason above.
+
+Two things that leaves, both deliberate:
+
+- `The_cooldowns_the_server_hands_out_are_the_ones_the_client_uses` asserts the real numbers
+  reached the real fields. Without it, a client that ignored its limits and hammered a service run
+  for free would pass every other test here. That the windows then *gate* anything is
+  `PacingTests`, which needs no server.
+- `A_locally_deleted_item_is_not_downloaded_back` keeps the real cooldowns, because the ten-second
+  deletion window is what holds its tombstone pending. Under the shrunk ones the deletion goes out
+  first and there is nothing left for the download to skip — it failed exactly that way when the
+  shrinking first went in, which is the test doing its job.
+
+**7 m 25 s to 1 m 55 s**, same 130 tests. The remaining cost is real second-granularity waiting,
+plus one Go server start. Parallelising the classes would help again and is not done: they share
+one server through `CloudUris`, which is process-global static state on both sides of this port,
+and racing it would trade seven minutes for a flake nobody can reproduce.
+
 ### The two wire formats
 
 Upstream serialises with Newtonsoft and **does not use the same settings for both transports**:

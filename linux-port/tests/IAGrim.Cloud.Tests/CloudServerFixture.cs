@@ -128,15 +128,29 @@ public sealed class CloudServerFixture : IDisposable {
 
     // The three real calls: ask for a login, read the code the server stored, exchange it.
     private string Register(string email) {
-        using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+        using var client = new HttpClient { Timeout = TimeSpan.FromMilliseconds(500) };
         var key = Guid.NewGuid().ToString();
 
-        // Returns 500 because sending the e-mail fails with no mail service configured. The
-        // attempt row is written before that, which is the part this needs.
-        try { client.GetAsync($"{Host}/login?email={Uri.EscapeDataString(email)}&token={key}").GetAwaiter().GetResult(); }
-        catch (HttpRequestException) { /* the 500 above */ }
+        // Fire and forget, deliberately.
+        //
+        // /login writes the attempt row and *then* sends the pin code through AWS SES. With no
+        // credentials and no SES to reach, that call sits there for about ten seconds before
+        // failing — and this used to wait for it, once per test, which was almost the entire
+        // runtime of this suite. Nothing here needs the response: the row this reads next is
+        // already committed by the time the mail attempt starts, and its 500 says only that an
+        // e-mail nobody is going to receive was not sent.
+        //
+        // The server handles the rest of that request on its own goroutine; the pin is polled for
+        // below rather than read once, since the write and this read are now genuinely concurrent.
+        try {
+            client.GetAsync($"{Host}/login?email={Uri.EscapeDataString(email)}&token={key}")
+                  .GetAwaiter().GetResult();
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException) {
+            // The 500, or our own 500 ms timeout arriving first. Both are expected.
+        }
 
-        var code = ReadPinCode(key)
+        var code = WaitForPinCode(key)
                    ?? throw new InvalidOperationException($"no login attempt stored for {email}");
 
         var form = new FormUrlEncodedContent([
@@ -155,6 +169,22 @@ public sealed class CloudServerFixture : IDisposable {
 
     private sealed class AuthResponse {
         public string? Token { get; set; }
+    }
+
+    /// <summary>
+    /// The pin the server stored for this login attempt, waiting for it to appear.
+    ///
+    /// The row is written before the mail attempt, so this normally succeeds first time; the
+    /// wait covers the case where the request has not reached the handler yet.
+    /// </summary>
+    private string? WaitForPinCode(string key) {
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (DateTime.UtcNow < deadline) {
+            var code = ReadPinCode(key);
+            if (!string.IsNullOrEmpty(code)) return code;
+            Thread.Sleep(25);
+        }
+        return null;
     }
 
     private string? ReadPinCode(string key) {

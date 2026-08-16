@@ -7,6 +7,8 @@
 bin/
 obj/
 node_modules/
+# `dotnet test --logger trx` writes here.
+TestResults/
 /linux-port/native/hook/build/
 /linux-port/packaging/out/
 # Everything vite writes: the hashed bundles, the index that names them, and whatever it
