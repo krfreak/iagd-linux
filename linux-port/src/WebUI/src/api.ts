@@ -187,6 +187,8 @@ export interface ItemFilters {
   hardcore?: boolean;
   /** Upstream's "Order By Level" checkbox: level first, then name. */
   orderByLevel?: boolean;
+  /** Newest first, by when the item was added. This port's own; upstream orders by name. */
+  orderByNewest?: boolean;
 }
 
 /**
@@ -277,6 +279,7 @@ function filterParams(filters: ItemFilters): URLSearchParams {
   set('petScope', filters.petScope);
   set('hasPetBonus', filters.hasPetBonus);
   set('orderByLevel', filters.orderByLevel);
+  set('orderByNewest', filters.orderByNewest);
   if (filters.hardcore !== undefined) params.set('hardcore', filters.hardcore ? '1' : '0');
 
   // Repeatable parameters: the host reads each occurrence separately.

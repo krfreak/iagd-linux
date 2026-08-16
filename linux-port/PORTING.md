@@ -145,6 +145,13 @@ which is upstream's `ItemOperationsUtility.MergeStackSize`, and the card offers 
 Ordering is upstream's too: name then id, and level first when "Order By Level" is ticked —
 ascending in both cases, from `PlayerItemDaoImpl.SearchForItems`.
 
+**"Newest First" is this port's own**, and the only search control here that upstream has no
+counterpart for. Upstream orders alphabetically, which is fine for finding an item you can name
+and useless for the question asked right after playing — what did I just pick up. A card stands
+for several rows, so it is dated by its most recent one (`MAX(created_at)`), which floats a card
+back to the top when another copy of it arrives. It takes precedence over "Order By Level", and
+the two checkboxes untick each other rather than leaving the toolbar claiming two orders at once.
+
 **The card is upstream's card.** Icon, name in its rarity colour, the tooltip the game itself
 drew, then the level requirement and the transfer links along the bottom edge. Two details are
 worth stating because they are not what a fresh implementation would do:

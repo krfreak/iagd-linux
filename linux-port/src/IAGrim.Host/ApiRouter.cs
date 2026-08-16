@@ -716,6 +716,7 @@ public sealed class ApiRouter {
             SocketedOnly          = ParseBool(query["socketed"]) ?? false,
             DuplicatesOnly        = ParseBool(query["duplicates"]) ?? false,
             OrderByLevel          = ParseBool(query["orderByLevel"]) ?? false,
+            OrderByNewest         = ParseBool(query["orderByNewest"]) ?? false,
             RecentOnly            = ParseBool(query["recent"]) ?? false,
             // Repeatable, because one UI slot can mean several item classes ("two-handed").
             Slot                  = query.GetValues("slot") ?? [],

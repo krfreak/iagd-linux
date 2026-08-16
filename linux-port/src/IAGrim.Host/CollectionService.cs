@@ -113,9 +113,16 @@ public sealed class CollectionService {
         // Upstream's ordering, from PlayerItemDaoImpl.SearchForItems: name then id, with the
         // level in front when the user asks for it. Ascending in both cases — theirs is
         // "ORDER BY PI.levelrequirement, PI.name, PI.Id".
-        var orderBy = query.OrderByLevel
-            ? "ORDER BY MIN(p.LevelRequirement), p.Name, MIN(p.Id)"
-            : "ORDER BY p.Name, MIN(p.Id)";
+        //
+        // "Newest first" is this port's own and sits in front of both: a card stands for several
+        // rows, so it is dated by its most recent one — MAX(created_at) — which is what puts a
+        // card back at the top when another copy of it is looted. created_at can be null on rows
+        // written by older tools, so those sort as oldest rather than dropping out of the order.
+        var orderBy = query.OrderByNewest
+            ? "ORDER BY MAX(IFNULL(p.created_at, 0)) DESC, p.Name, MIN(p.Id)"
+            : query.OrderByLevel
+                ? "ORDER BY MIN(p.LevelRequirement), p.Name, MIN(p.Id)"
+                : "ORDER BY p.Name, MIN(p.Id)";
 
         using var command = connection.CreateCommand();
         // MIN(p.Id) is not decoration: with a GROUP BY, SQLite takes the other columns from the

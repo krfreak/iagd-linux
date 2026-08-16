@@ -32,6 +32,15 @@ public sealed record ItemQuery {
     /// </summary>
     public bool OrderByLevel { get; init; }
 
+    /// <summary>
+    /// Newest first: the most recently added item at the top, rather than alphabetically.
+    ///
+    /// Not upstream's — it orders by name, or by level when asked. Added because the collection
+    /// is a list you add to, and after looting there is no way to see what just arrived without
+    /// hunting for it by name. Takes precedence over <see cref="OrderByLevel"/> when both are on.
+    /// </summary>
+    public bool OrderByNewest { get; init; }
+
     /// <summary>Looted in the last 12 hours, matching upstream's window.</summary>
     public bool RecentOnly { get; init; }
 

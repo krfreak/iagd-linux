@@ -595,9 +595,27 @@ function Toolbar({ filters, onChange, catalogue, mods, query, onQuery, searchRef
         <input
           type="checkbox"
           checked={Boolean(filters.orderByLevel)}
-          onChange={(e) => patch({ orderByLevel: (e.target as HTMLInputElement).checked })}
+          onChange={(e) => {
+            const checked = (e.target as HTMLInputElement).checked;
+            patch(checked ? { orderByLevel: true, orderByNewest: false } : { orderByLevel: false });
+          }}
         />
         <span>Order By Level</span>
+      </label>
+
+      {/* Not upstream's — see ItemQuery.OrderByNewest. It wins over "Order By Level" when both
+          are ticked, which is why ticking it unticks the other rather than leaving the pair
+          saying two different things. */}
+      <label class="toolbar__check">
+        <input
+          type="checkbox"
+          checked={Boolean(filters.orderByNewest)}
+          onChange={(e) => {
+            const checked = (e.target as HTMLInputElement).checked;
+            patch(checked ? { orderByNewest: true, orderByLevel: false } : { orderByNewest: false });
+          }}
+        />
+        <span>Newest First</span>
       </label>
 
       <select
