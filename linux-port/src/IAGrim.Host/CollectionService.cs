@@ -434,13 +434,23 @@ public sealed class CollectionService {
     private static ItemSummary ReadSummary(SqliteDataReader reader) {
         string? Text(int i) => reader.IsDBNull(i) ? null : reader.GetString(i);
 
+        // An empty name is as absent as a null one, and both occur: the column is written by
+        // several paths and one of them stored "" for an item the game named nowhere.
+        static string? Blank(string? value) => string.IsNullOrWhiteSpace(value) ? null : value;
+
         var rawName = Text(10);
-        var lootedName = Text(1);
+        var storedName = Text(1);
         var templateName = Text(5);
 
         return new ItemSummary(
             Id:         reader.GetInt64(0),
-            Name:       rawName ?? lootedName ?? templateName ?? "Unknown Item",
+            // The stored name first, which is upstream's only answer: it sends
+            // PureItemName(item.Name) and nothing else. It is the composed one
+            // (ItemNameComposer), so two copies of an item are captioned identically however
+            // each of them arrived. The tooltip line behind it is the game's display text, set
+            // markers and all, and is a fallback rather than a source — it is all there is for a
+            // record the parsed game data does not describe.
+            Name:       Blank(storedName) ?? Blank(rawName) ?? Blank(templateName) ?? "Unknown Item",
             BaseRecord: reader.GetString(2),
             Seed:       reader.GetInt64(3),
             IsHardcore: reader.GetInt64(4) != 0,

@@ -59,13 +59,13 @@ public sealed class CloudWorker : IDisposable {
         _authService = new AuthService(new AuthenticationProvider(settings), _itemStore);
 
         _backupService = new BackupService(_authService, _itemStore, settings, OnItemsUploaded);
-        _backupService.OnItemsChanged += (_, _) => Announce("Items arrived from your online backup.");
+        _backupService.OnItemsChanged += (_, _) => Arrived("Items arrived from your online backup.");
 
         _buddyItemsService = new BuddyItemsService(_buddyStore, settings, _authService);
         _buddyItemsService.OnItemsChanged += (_, _) => Announce("A buddy's items were updated.");
 
         _liveSync = new WebSocketSyncService(new AuthenticationProvider(settings), settings, _itemStore);
-        _liveSync.OnItemsChanged += (_, _) => Announce("Items arrived from your other PC.");
+        _liveSync.OnItemsChanged += (_, _) => Arrived("Items arrived from your other PC.");
 
         // Character backup needs the game's save directory, which lives inside the Proton prefix.
         // Without a prefix there is nothing to back up and the service is simply not created.
@@ -252,6 +252,25 @@ public sealed class CloudWorker : IDisposable {
 
     private void Announce(string message) =>
         _ = _events.BroadcastAsync(HostEvent.Message(message, "info"), CancellationToken.None);
+
+    /// <summary>
+    /// Items came down from the service, so say so — and name them the way this collection names
+    /// everything else.
+    ///
+    /// The server stores the name each item had on the machine that uploaded it, and the client
+    /// that uploaded it may have been an older one, or Windows, or this port before the names
+    /// were composed. Upstream has the same wire format and the same problem, and solves it the
+    /// same way: what it stores is what its own game data says the item is called. Without this,
+    /// a restored collection lists two names for two copies of one item.
+    /// </summary>
+    private void Arrived(string message) {
+        Announce(message);
+        try { StatRefresh.RefreshNames(_databasePath); }
+        catch (Exception ex) {
+            // Cosmetic, and the next start repairs it anyway; never worth killing the sync loop.
+            Console.Error.WriteLine($"could not rename items that arrived online: {ex.Message}");
+        }
+    }
 
     /// <summary>
     /// The character-backup half of the panel.

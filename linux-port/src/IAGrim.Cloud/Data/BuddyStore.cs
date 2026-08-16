@@ -293,10 +293,16 @@ public sealed class BuddyStore : IDisposable {
     /// <b>The mechanism differs from upstream's, deliberately.</b> Upstream pivots
     /// <c>DatabaseItemStat_v2</c> for <c>itemNameTag</c>/<c>itemQualityTag</c>/
     /// <c>itemStyleTag</c>/<c>lootRandomizerName</c> and composes them through its language
-    /// pack's <c>TranslateName</c>. This port names every item it shows out of
-    /// <c>ItemTemplate</c>, which is the same game data already denormalised at parse time, and
-    /// using anything else here would mean a buddy's copy of an item is captioned differently
-    /// from the player's own copy of the same item in the same list.
+    /// pack's <c>TranslateName</c>, which is what <c>IAGrim.Core.ItemStats.ItemNameComposer</c>
+    /// now does for the player's own items. It is not used here, and the reason is the stat
+    /// table: this port stores rows only for the records *this* collection references, so a
+    /// buddy's item made of records the player does not own has nothing to compose from. Naming
+    /// some buddy items in full and leaving others blank is worse than naming all of them after
+    /// their base record, which <c>ItemTemplate</c> knows for every record in the game.
+    ///
+    /// The cost is that a buddy's green reads "Scalemail Gloves" where the player's own copy
+    /// reads "Shrewd Scalemail Gloves of Oleron's Wrath". Composing here needs the stat rows for
+    /// records nobody owns, which is a change to what the analysis pass stores.
     ///
     /// Returns how many names were resolved. Items whose record has not been parsed yet keep a
     /// null name and are retried on the next pass.

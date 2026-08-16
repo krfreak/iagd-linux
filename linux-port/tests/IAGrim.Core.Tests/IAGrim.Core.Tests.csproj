@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>IAGrim.Core.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <!--
+    Item naming is behaviour, not a table, so it is tested rather than compared against
+    upstream's source by a verify-*.sh script. What matters is not that one name comes out
+    right but that the *same* name comes out for copies of an item that arrived by different
+    routes — which is a fixture with a collection in it, not a string comparison.
+
+    Everything here runs against a temporary SQLite file built from Schema, so the tests need
+    no game installation, no network and no collection of their own.
+  -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/IAGrim.Core/IAGrim.Core.csproj" />
+    <ProjectReference Include="../../src/IAGrim.Platform/IAGrim.Platform.csproj" />
+  </ItemGroup>
+
+</Project>

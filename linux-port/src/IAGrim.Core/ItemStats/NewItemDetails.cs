@@ -35,6 +35,12 @@ public static class NewItemDetails {
         var wanted = items.SelectMany(item => item.Records()).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var statsByRecord = LoadStats(connection, wanted);
 
+        // The name is composed here for the same reason the rarity is: upstream's Save writes
+        // both in one statement, so an item is never briefly listed under the text it arrived
+        // with. Null when the game data has not been parsed, in which case the name it arrived
+        // with is the only one there is.
+        var composer = ItemNameComposer.Load(connection);
+
         // The seed engine and the rarity rules both take upstream's filtered view of the rows.
         var filtered = statsByRecord.ToDictionary(
             kv => kv.Key,
@@ -48,14 +54,19 @@ public static class NewItemDetails {
 
         using var details = connection.CreateCommand();
         details.Transaction = transaction;
+        // IFNULL rather than two statements: an item whose records name it nowhere keeps the
+        // name it arrived with, which is better than the empty string the composer returns.
         details.CommandText = """
             UPDATE PlayerItem
-               SET Rarity = $rarity, PrefixRarity = $prefixRarity, LevelRequirement = $level
+               SET Rarity = $rarity, PrefixRarity = $prefixRarity, LevelRequirement = $level,
+                   Name = IFNULL($name, Name), namelowercase = IFNULL($lower, namelowercase)
              WHERE Id = $id;
             """;
         var detailRarity = details.Parameters.Add("$rarity", SqliteType.Text);
         var detailPrefix = details.Parameters.Add("$prefixRarity", SqliteType.Integer);
         var detailLevel  = details.Parameters.Add("$level", SqliteType.Real);
+        var detailName   = details.Parameters.Add("$name", SqliteType.Text);
+        var detailLower  = details.Parameters.Add("$lower", SqliteType.Text);
         var detailId     = details.Parameters.Add("$id", SqliteType.Integer);
 
         using var clear = connection.CreateCommand();
@@ -81,9 +92,14 @@ public static class NewItemDetails {
                 continue;
             }
 
+            var name = composer?.Compose(filtered, item.BaseRecord, item.PrefixRecord,
+                                         item.SuffixRecord, item.MateriaRecord);
+
             detailRarity.Value = ItemRarity.ForRecords(filtered, records);
             detailPrefix.Value = ItemRarity.GreenQualityLevelForRecords(filtered, records);
             detailLevel.Value  = ItemRarity.MinimumLevelForRecords(filtered, records);
+            detailName.Value   = string.IsNullOrEmpty(name) ? DBNull.Value : name;
+            detailLower.Value  = string.IsNullOrEmpty(name) ? DBNull.Value : name.ToLowerInvariant();
             detailId.Value     = item.Id;
             details.ExecuteNonQuery();
             described++;

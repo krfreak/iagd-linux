@@ -239,8 +239,10 @@ internal static class ItemQueryBuilder {
             //    replicaitemrow WHERE IFNULL(textlowercase, text) LIKE :wildcard))
             //
             // PORT: the trailing clause on the template name is ours. Upstream has no equivalent
-            // because it stores the composed name on the item itself; here an item whose tooltip
-            // was never captured would otherwise be unsearchable.
+            // because every item it stores has a composed name — so does this port now
+            // (ItemNameComposer), which leaves this clause covering the one case that has none:
+            // an item whose records the parsed game data does not describe, which would
+            // otherwise be unsearchable.
             fragments.Add("""
                 (p.namelowercase LIKE :name
                  OR r.Id IN (SELECT replicaitemid FROM ReplicaItemRow

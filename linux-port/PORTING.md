@@ -700,9 +700,11 @@ Two things make this less trivial than swapping a filename:
   contain spaces; adjacent tags have no separator) and upstream's comments record a bug it has
   already fixed there.
 
-Composed names — prefix + quality + core + suffix — come from the game's own tooltip through the
-hook, so they are already in the player's language and already agree grammatically. Only the
-template names needed this.
+Composed names — prefix + quality + core + suffix — used to come from the game's own tooltip
+through the hook, which made them already localised and already grammatical, at the cost of
+being available only for items looted while playing. They are now composed here from the same
+tags upstream composes them from, which needs the gender handling for exactly the reason above;
+see *An item's name is composed, not remembered*.
 
 ### The window has to keep itself up to date
 
@@ -1373,6 +1375,70 @@ carried over, then modifier and pet rows added and numerics summed across record
 to read the roll back from `ComputedItemStat`, which is keyed by item and stat name — so where
 two records carried the same stat, one value overwrote the other and a line vanished. That table
 stays as it is for the filters, which need the values in SQL; it is no longer what the card reads.
+
+### An item's name is composed, not remembered
+
+Upstream never keeps the name an item arrives with. `PlayerItemDaoImpl.Save` stores the item and
+then rewrites its name from the game's own tags — `itemNameTag`, `itemQualityTag`,
+`itemStyleTag`, the affixes' `lootRandomizerName` and the socketed component's `description`,
+ordered by the game's `tagItemNameOrder` — and `UpdateAllItemStats` does the same for the whole
+collection. Two items made of the same records therefore carry the same name whatever route they
+took into the database.
+
+This port used to store whichever name came with the item, and there are three sources:
+
+- the **hook**, which hands over the tooltip line the game drew. That is display text: a set
+  item reads `(S) ^BLokarr's Coat`, where `(S)` marks the set and `^B` is a colour code.
+- the **online backup**, which hands over the name held by whichever client uploaded the item.
+  An older client stored the same tooltip text with the older marker — `{}` where the current
+  game writes `^B`.
+- a **merged collection**, which hands over that other database's third answer.
+
+One collection ended up holding `Lokarr's Coat`, `(S) Lokarr's Coat` and `(S) {}Lokarr's Coat`
+for copies of one item, which the comparison view showed side by side as if they were different
+items. Measured on a real collection: 7,472 of 15,177 items carried a marker in the name column,
+and 7,485 distinct names collapsed to 3,827 once composed.
+
+`ItemNameComposer` ports `ItemOperationsUtility.GetItemName`, ordering through upstream's own
+`ItemNameCombinator` rather than a reimplementation. It is used in the two places upstream uses
+its equivalent — `NewItemDetails` as an item is imported, and the analysis pass for everything —
+plus one this port needs and upstream does not:
+
+**`ItemNameRefresh` sweeps the collection.** An item inserted *with* a name already on it — from
+the online backup, from a merge — looks complete: it has a rarity and a level, so nothing ever
+asks to describe it again, and its foreign name would survive for ever. The sweep composes every
+item's name from stat rows already stored and rewrites only the rows that differ. It runs at
+startup and whenever items arrive from the service, which is exactly when a foreign name can
+enter. It reads five stat fields per record rather than an item's whole stat block — 4,288 rows
+out of 153,220 on the collection above — which is what keeps it affordable at both those moments:
+measured at 150-190 ms over 15,177 items with nothing to change.
+
+An item whose records the parsed game data does not describe **keeps the name it has**. A
+composed empty string is not an improvement on a stale name, and blanking it would drop the item
+out of the name search entirely — so the `UPDATE`s use `IFNULL($name, Name)` rather than writing
+unconditionally.
+
+Two consequences worth stating:
+
+- **The tooltip is a fallback, not a source.** `AttachReplica` fills the name column only when it
+  is empty, and the card prefers the stored name over the captured tooltip line — upstream sends
+  `PureItemName(item.Name)` and nothing else. The tooltip still names items whose records are
+  not in the game data at all, which is more than upstream offers.
+- **A socketed component is part of the name**, in brackets, because upstream puts it there.
+  Upstream's UI splits the brackets back off and draws the component separately; this port shows
+  the name as stored, which is what it did before for the items that happened to arrive with a
+  component in their name.
+
+Verified by execution rather than by reading: for the 94 items in a real collection that have
+both a captured tooltip and a composable name, the composed name equals the game's own tooltip
+name for 90 of them, and each of the four differences is one of the two rules above — a set
+marker removed, or a component appended.
+
+**Buddy items are still named from `ItemTemplate`**, and that is now the one place a name is not
+composed. It is deliberate: `DatabaseItemStat_v2` holds only the records *this* collection
+references, so a buddy's item made of records the player does not own has no rows to compose
+from, and composing would name some buddy items in full and leave others with nothing. The base
+record's name is worse than upstream's answer but it is the same answer for every buddy item.
 
 ### Never ask for the same tooltip twice
 

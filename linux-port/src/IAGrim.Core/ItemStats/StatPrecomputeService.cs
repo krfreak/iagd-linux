@@ -112,19 +112,30 @@ public sealed class StatPrecomputeService {
         var statParam = insert.Parameters.Add("$stat", SqliteType.Text);
         var valueParam = insert.Parameters.Add("$value", SqliteType.Real);
 
-        // Rarity, affix quality and level requirement. Written for every item, including the
-        // ones the seed engine bails out on: they are read straight off the records and do not
-        // depend on the roll, so a skipped roll must not also cost the item its rarity.
+        // Name, rarity, affix quality and level requirement — upstream's UpdateItemDetailsBatch,
+        // column for column. Written for every item, including the ones the seed engine bails
+        // out on: they are read straight off the records and do not depend on the roll, so a
+        // skipped roll must not also cost the item its rarity.
+        //
+        // The name is here rather than left as it arrived because this is the only point at
+        // which every item in the collection is looked at with the game data to hand, and a name
+        // that came from a tooltip or from another machine's client is not the name the same
+        // item gets when it is looted here. See ItemNameComposer.
+        var composer = ItemNameComposer.Load(connection);
+
         using var details = connection.CreateCommand();
         details.Transaction = transaction;
         details.CommandText = """
             UPDATE PlayerItem
-               SET Rarity = $rarity, PrefixRarity = $prefixRarity, LevelRequirement = $level
+               SET Rarity = $rarity, PrefixRarity = $prefixRarity, LevelRequirement = $level,
+                   Name = IFNULL($name, Name), namelowercase = IFNULL($lower, namelowercase)
              WHERE Id = $id;
             """;
         var detailRarity = details.Parameters.Add("$rarity", SqliteType.Text);
         var detailPrefix = details.Parameters.Add("$prefixRarity", SqliteType.Integer);
         var detailLevel  = details.Parameters.Add("$level", SqliteType.Real);
+        var detailName   = details.Parameters.Add("$name", SqliteType.Text);
+        var detailLower  = details.Parameters.Add("$lower", SqliteType.Text);
         var detailId     = details.Parameters.Add("$id", SqliteType.Integer);
 
         foreach (var item in items) {
@@ -132,9 +143,14 @@ public sealed class StatPrecomputeService {
                 record is not null && filtered.TryGetValue(record, out var rows) ? rows : [];
 
             var detailRecords = item.Records().ToList();
+            var name = composer?.Compose(filtered, item.BaseRecord, item.PrefixRecord,
+                                         item.SuffixRecord, item.MateriaRecord);
+
             detailRarity.Value = ItemRarity.ForRecords(filtered, detailRecords);
             detailPrefix.Value = ItemRarity.GreenQualityLevelForRecords(filtered, detailRecords);
             detailLevel.Value  = ItemRarity.MinimumLevelForRecords(filtered, detailRecords);
+            detailName.Value   = string.IsNullOrEmpty(name) ? DBNull.Value : name;
+            detailLower.Value  = string.IsNullOrEmpty(name) ? DBNull.Value : name.ToLowerInvariant();
             detailId.Value     = item.Id;
             details.ExecuteNonQuery();
 
@@ -183,6 +199,11 @@ public sealed class StatPrecomputeService {
     /// by every other measure.
     ///
     /// Raise this whenever the rows written here change shape or content.
+    ///
+    /// The item name this pass now also writes is deliberately *not* a reason to raise it:
+    /// <see cref="ItemNameRefresh"/> repairs stored names from data already in the collection,
+    /// so forcing every installation through a fresh archive read to get the same strings would
+    /// buy nothing — and would leave anyone whose game folder has moved with stale names.
     /// </summary>
     public const int Version = 3;
 

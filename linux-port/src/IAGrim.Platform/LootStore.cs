@@ -258,14 +258,18 @@ public sealed class LootStore : IDisposable {
             row.ExecuteNonQuery();
         }
 
-        // The name column is what the collection falls back to; now that the game has rendered
-        // one, use it.
+        // A name only for an item that has none. The tooltip is the game's *display* text and
+        // carries its display markers — a set item reads "(S) Lokarr's Coat" — so an item that
+        // already has the name composed from the game's tags must keep it, or the same item
+        // ends up captioned one way when its tooltip was captured and another when it was not.
+        // See IAGrim.Core.ItemStats.ItemNameComposer.
         var name = stats.FirstOrDefault(s => s.TextClass == 6)?.Text ?? stats.FirstOrDefault()?.Text;
         if (name is not null) {
             using var update = _connection.CreateCommand();
             update.Transaction = transaction;
             update.CommandText =
-                "UPDATE PlayerItem SET Name = $name, namelowercase = $lower WHERE Id = $id;";
+                "UPDATE PlayerItem SET Name = $name, namelowercase = $lower "
+                + "WHERE Id = $id AND IFNULL(Name, '') = '';";
             update.Parameters.AddWithValue("$id", id);
             update.Parameters.AddWithValue("$name", LootedItem.StripColourCodes(name));
             update.Parameters.AddWithValue("$lower", LootedItem.StripColourCodes(name).ToLowerInvariant());

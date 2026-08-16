@@ -225,8 +225,9 @@ public static class ItemExport {
                 AscendantAffix2hNameRecord = Empty(item.AscendantAffix2hNameRecord),
                 AffixRerollsUsed = item.AffixRerollsUsed,
                 StackCount = Math.Max(1, item.StackCount),
-                // No tooltip: the exporting tool never had one to give. Names come from
-                // ItemTemplate instead, and 'iagd stats' fills in the rolled values.
+                // No tooltip: the exporting tool never had one to give. The name is composed
+                // from the game's tags when the item is described (ItemNameComposer), and
+                // 'iagd stats' fills in the rolled values.
                 Stats = [],
             };
 
