@@ -169,6 +169,9 @@ chmod +x "$APPDIR/usr/bin/"iagd "$APPDIR/usr/bin/"iagd-cli \
 
 # ── AppImage metadata ────────────────────────────────────────────────────────────────────────
 
+# StartupWMClass has to match what the window actually identifies itself as — the Wayland app_id
+# and the X11 WM_CLASS, both of which the app sets to "iagd" — and not the window's title. Get it
+# wrong and the desktop cannot tie the window to this entry, which costs it the taskbar icon.
 cat > "$APPDIR/iagd.desktop" <<DESKTOP
 [Desktop Entry]
 Type=Application
@@ -178,7 +181,7 @@ Exec=iagd
 Icon=iagd
 Categories=Utility;
 Terminal=false
-StartupWMClass=Item Assistant for Grim Dawn
+StartupWMClass=iagd
 DESKTOP
 
 install -Dm644 "$APPDIR/iagd.desktop" "$APPDIR/usr/share/applications/iagd.desktop"

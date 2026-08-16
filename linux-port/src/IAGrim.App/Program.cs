@@ -178,6 +178,15 @@ internal static class Program {
             .SetUseOsDefaultSize(false)
             .SetSize(1280, 820)
             .SetMinSize(720, 480)
+            // Photino's native SetMinSize passes GDK_HINT_MIN_SIZE and GDK_HINT_MAX_SIZE in one
+            // gtk_window_set_geometry_hints call, so asking for a minimum publishes a maximum
+            // too — int.MaxValue, whatever we do. On a display at 200% scale that value
+            // overflows on its way through GTK and reaches the compositor as a single pixel: a
+            // maximum below the minimum, which KWin reads as "this window cannot be resized".
+            // Measured on a 200% SteamOS session, the window arrived pinned at 722x509 with the
+            // maximize button gone. A finite maximum no monitor will reach survives being
+            // multiplied by any scale factor.
+            .SetMaxSize(16384, 16384)
             .SetUseOsDefaultLocation(false)
             .Center()
             // No right-click menu: it is WebKit's ("Reload", "Open Link"), which reads as a
