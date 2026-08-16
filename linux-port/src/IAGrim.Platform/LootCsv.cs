@@ -52,6 +52,16 @@ public sealed record LootedItem {
     /// </summary>
     public string? KnownName { get; init; }
 
+    /// <summary>
+    /// The cloud identity this item already has, when it comes from a collection that had one.
+    ///
+    /// Null for anything the hook looted — those get a fresh id on insert. It is set by a merge,
+    /// where re-minting would hide from the download that the server's copy and this one are the
+    /// same item. <c>cloud_hassync</c> stays 0 either way: carrying the id says "the server may
+    /// know this item as X", not "the server has it".
+    /// </summary>
+    public string? CloudId { get; init; }
+
     /// <summary>First stat line, which the game emits as the item's name.</summary>
     public string? Name => KnownName ?? Stats.FirstOrDefault()?.Text;
 

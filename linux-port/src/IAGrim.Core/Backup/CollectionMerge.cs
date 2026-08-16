@@ -98,14 +98,29 @@ public static class CollectionMerge {
         // starts. SQLite takes one writer per database, and LootStore.Insert opens a transaction
         // on its own connection — holding a second one here deadlocks the merge against itself.
         var existing = new HashSet<string>(StringComparer.Ordinal);
+
+        // Cloud ids already spoken for here. An incoming item keeps its own id (see below), but
+        // never one this collection is already using: two rows sharing an id make a deletion
+        // ambiguous — the tombstone would tell the server to remove the item the *other* row
+        // still stands for.
+        var claimedCloudIds = new HashSet<string>(StringComparer.Ordinal);
+
         using (var destination = new SqliteConnection($"Data Source={databasePath}")) {
             destination.Open();
             Schema.Apply(destination);
 
-            using var command = destination.CreateCommand();
-            command.CommandText = $"SELECT {IdentitySelect()} FROM PlayerItem;";
-            using var reader = command.ExecuteReader();
-            while (reader.Read()) existing.Add(Identity(reader));
+            using (var command = destination.CreateCommand()) {
+                command.CommandText = $"SELECT {IdentitySelect()} FROM PlayerItem;";
+                using var reader = command.ExecuteReader();
+                while (reader.Read()) existing.Add(Identity(reader));
+            }
+
+            using (var command = destination.CreateCommand()) {
+                command.CommandText =
+                    "SELECT cloudid FROM PlayerItem WHERE cloudid IS NOT NULL AND cloudid <> '';";
+                using var reader = command.ExecuteReader();
+                while (reader.Read()) claimedCloudIds.Add(reader.GetString(0));
+            }
         }
 
         // What this source actually carries, which decides how the query below is written.
@@ -125,8 +140,11 @@ public static class CollectionMerge {
         using var store = new LootStore(databasePath);
 
         using (var command = source.CreateCommand()) {
+            // The cloud id comes across with the item — see LootedItem.CloudId. A collection old
+            // enough to predate the column simply has none, and the insert mints one.
+            var cloudId = columns.Contains("cloudid") ? "IFNULL(cloudid,'')" : "''";
             command.CommandText = $"""
-                SELECT {IdentitySelect(columns)}, Id, IFNULL(Name,'')
+                SELECT {IdentitySelect(columns)}, Id, IFNULL(Name,''), {cloudId}
                 FROM PlayerItem ORDER BY Id;
                 """;
 
@@ -138,7 +156,15 @@ public static class CollectionMerge {
                 var identity = Identity(reader);
                 if (!existing.Add(identity)) { duplicates++; continue; }
 
-                var item = ReadItem(reader) with { KnownName = Blank(reader, 19) };
+                var incomingCloudId = Blank(reader, 20);
+                if (incomingCloudId is not null && !claimedCloudIds.Add(incomingCloudId)) {
+                    incomingCloudId = null;   // already used here; the insert mints a fresh one
+                }
+
+                var item = ReadItem(reader) with {
+                    KnownName = Blank(reader, 19),
+                    CloudId   = incomingCloudId,
+                };
 
                 // Whatever the other collection allowed itself, this one keeps to the rules the
                 // hook applies while looting. A collection that predates a rule, or came from a

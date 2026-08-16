@@ -107,6 +107,11 @@ internal static class LootImporter {
                         cancellationToken);
                 }
 
+                // Counted rather than announced one by one: a stash tab emptied in one go can
+                // hold several copies of the same roll, and four toasts saying the same thing is
+                // worse than one that says how many.
+                var duplicates = new List<string>();
+
                 foreach (var result in watcher.ImportPending()) {
                     if (result.Error is not null) {
                         Console.Error.WriteLine(
@@ -116,7 +121,16 @@ internal static class LootImporter {
                             cancellationToken);
                         continue;
                     }
-                    if (result.Duplicate) continue;
+                    // The collection already holds this exact roll, so the row is not written and
+                    // the item is gone from the game — the player has one fewer than they had.
+                    // Upstream drops it too (ItemClassificationService), but it says so in its log
+                    // and this said nothing at all, which is how "I moved four items in and two
+                    // arrived" looked like items being lost in transit.
+                    if (result.Duplicate) {
+                        duplicates.Add(result.Item!.PlainName ?? result.Item.BaseRecord);
+                        Console.WriteLine($"already in the collection, not added: {duplicates[^1]}");
+                        continue;
+                    }
 
                     Console.WriteLine($"looted: {result.Item!.PlainName}");
 
@@ -141,6 +155,15 @@ internal static class LootImporter {
                     if (newest is not null) {
                         await events.BroadcastAsync(HostEvent.Looted(newest), cancellationToken);
                     }
+                }
+
+                if (duplicates.Count > 0) {
+                    await events.BroadcastAsync(HostEvent.Message(
+                        duplicates.Count == 1
+                            ? $"{duplicates[0]} was already in your collection, so it was not added again."
+                            : $"{duplicates.Count} looted items were already in your collection "
+                              + "and were not added again.",
+                        "warning"), cancellationToken);
                 }
             }
             catch (Exception ex) {

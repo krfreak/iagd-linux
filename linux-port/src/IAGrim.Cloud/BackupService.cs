@@ -98,9 +98,9 @@ public sealed class BackupService {
     /// <summary>
     /// Tells the server about items deleted here.
     ///
-    /// The tombstones are cleared only on a successful batch, and the whole pass gives up on the
-    /// first failure — leaving the remaining tombstones in place. A deletion that is dropped
-    /// instead of retried means the item comes back down on the next download.
+    /// A tombstone is cleared only once the server has accepted that id, and the whole pass gives
+    /// up on the first failure — leaving every deletion it did not send still pending. A deletion
+    /// that is dropped instead of retried means the item comes back down on the next download.
     /// </summary>
     private void SyncDeletions() {
         var items = _playerItemDao.GetItemsMarkedForOnlineDeletion();
@@ -115,7 +115,13 @@ public sealed class BackupService {
 
             if (!_cloudSyncService!.Delete(batch)) return;
 
-            _playerItemDao.ClearItemsMarkedForOnlineDeletion();
+            // Only this batch's ids. Upstream clears the entire table here, which is fine on a
+            // clean run — the remaining batches are already in `dtos` and still go out — and
+            // loses the rest the moment a later batch does not: a failed request or a logout
+            // returns from this loop with every unsent tombstone already erased, so those
+            // deletions are never retried and the items come back on the next download.
+            _playerItemDao.ClearItemsMarkedForOnlineDeletion(
+                batch.Select(dto => dto.Id).Where(id => !string.IsNullOrEmpty(id)).ToList()!);
         }
     }
 

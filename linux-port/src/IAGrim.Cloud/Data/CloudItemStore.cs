@@ -24,6 +24,9 @@ public interface ICloudItemStore {
     /// <summary>Drops the tombstones, once the server has accepted them.</summary>
     void ClearItemsMarkedForOnlineDeletion();
 
+    /// <summary>Drops only the named tombstones — the ids the server has just accepted.</summary>
+    void ClearItemsMarkedForOnlineDeletion(IReadOnlyCollection<string> ids);
+
     /// <summary>Stores items that came down from the cloud.</summary>
     void Save(IList<CloudItem> items);
 
@@ -120,6 +123,32 @@ public sealed class CloudItemStore : ICloudItemStore, IDisposable {
         using var command = _connection.CreateCommand();
         command.CommandText = "DELETE FROM deletedplayeritem_v3;";
         command.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// PORT FIX. Upstream clears the whole table after every accepted batch
+    /// (BackupService.SyncDeletions). On a clean run that costs nothing — the later batches are
+    /// already in memory and still go out. It costs everything when a batch fails or the user
+    /// logs out mid-pass: the loop returns with every unsent tombstone already erased, so those
+    /// deletions are never retried and the server keeps items the player deleted here, handing
+    /// them back on the next download.
+    ///
+    /// Only reachable with more than one batch of deletions, which is why it survived upstream:
+    /// it takes emptying a stash, or collapsing a duplicated collection, to produce a hundred
+    /// at once.
+    /// </summary>
+    public void ClearItemsMarkedForOnlineDeletion(IReadOnlyCollection<string> ids) {
+        if (ids.Count == 0) return;
+
+        using var transaction = _connection.BeginTransaction();
+        foreach (var id in ids) {
+            using var command = _connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = "DELETE FROM deletedplayeritem_v3 WHERE id = $id;";
+            command.Parameters.AddWithValue("$id", id);
+            command.ExecuteNonQuery();
+        }
+        transaction.Commit();
     }
 
     /// <summary>

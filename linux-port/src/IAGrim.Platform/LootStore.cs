@@ -23,14 +23,32 @@ public sealed class LootStore : IDisposable {
     }
 
     /// <summary>
-    /// An item is identified by base record + seed, which is how Grim Dawn itself identifies
-    /// a rolled item. Re-importing the same loot file must not duplicate it.
+    /// Whether the collection already holds this item. Re-importing the same loot file must not
+    /// duplicate it.
+    ///
+    /// Upstream's key, from <c>PlayerItemDaoImpl.Exists</c>: base record, both affixes, the
+    /// socketed component and the modifier, plus the seed. This used to compare base record and
+    /// seed alone, which is looser than upstream in a way that shows: the same roll with a
+    /// component socketed into it is a different item to upstream and was the same one here, so
+    /// looting it back out of the game dropped it.
     /// </summary>
     public bool Exists(LootedItem item) {
         using var command = _connection.CreateCommand();
-        command.CommandText =
-            "SELECT 1 FROM PlayerItem WHERE BaseRecord = $base AND Seed = $seed LIMIT 1;";
+        command.CommandText = """
+            SELECT 1 FROM PlayerItem
+            WHERE BaseRecord = $base
+              AND IFNULL(PrefixRecord,'')   = $prefix
+              AND IFNULL(SuffixRecord,'')   = $suffix
+              AND IFNULL(MateriaRecord,'')  = $materia
+              AND IFNULL(ModifierRecord,'') = $modifier
+              AND Seed = $seed
+            LIMIT 1;
+            """;
         command.Parameters.AddWithValue("$base", item.BaseRecord);
+        command.Parameters.AddWithValue("$prefix", item.PrefixRecord ?? "");
+        command.Parameters.AddWithValue("$suffix", item.SuffixRecord ?? "");
+        command.Parameters.AddWithValue("$materia", item.MateriaRecord ?? "");
+        command.Parameters.AddWithValue("$modifier", item.ModifierRecord ?? "");
         command.Parameters.AddWithValue("$seed", item.Seed);
         return command.ExecuteScalar() is not null;
     }
@@ -99,7 +117,14 @@ public sealed class LootStore : IDisposable {
             // whether online sync is switched on. See CloudIdentity: an item that reaches another
             // machine before it has a stable id arrives twice. `cloud_hassync` starts at 0, which
             // is what marks it as still to upload.
-            command.Parameters.AddWithValue("$cloudId", CloudIdentity.New());
+            //
+            // An item that arrives already carrying one keeps it. That is a merge from another
+            // collection of the same account: the server knows this item under that id, and
+            // minting a fresh one here makes the download treat the server's copy as a different
+            // item and store it alongside — which is how a collection ends up doubled.
+            command.Parameters.AddWithValue(
+                "$cloudId",
+                string.IsNullOrEmpty(item.CloudId) ? CloudIdentity.New() : item.CloudId);
 
             id = (long)command.ExecuteScalar()!;
         }

@@ -129,6 +129,8 @@ public sealed class CloudItemStoreHandle : IAGrim.Cloud.Data.ICloudItemStore, ID
     public IList<string> GetOnlineIds() => _store.GetOnlineIds();
     public IList<IAGrim.Cloud.Dto.ItemIdentifierDto> GetItemsMarkedForOnlineDeletion() => _store.GetItemsMarkedForOnlineDeletion();
     public void ClearItemsMarkedForOnlineDeletion() => _store.ClearItemsMarkedForOnlineDeletion();
+    public void ClearItemsMarkedForOnlineDeletion(IReadOnlyCollection<string> ids) =>
+        _store.ClearItemsMarkedForOnlineDeletion(ids);
     public void Save(IList<CloudItem> items) => _store.Save(items);
     public void Delete(IList<IAGrim.Cloud.Dto.DeleteItemDto> items) => _store.Delete(items);
     public void ResetOnlineSyncState() => _store.ResetOnlineSyncState();

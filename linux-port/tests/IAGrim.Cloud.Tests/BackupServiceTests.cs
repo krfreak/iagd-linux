@@ -1,3 +1,4 @@
+using IAGrim.Cloud.Data;
 using IAGrim.Cloud.Dto;
 using Xunit;
 
@@ -196,6 +197,87 @@ public class BackupServiceTests {
 
         Assert.True(second.PumpUntil(() => second.Collection.CountItems() == 0),
             "the deletion never reached the second machine");
+    }
+
+    /// <summary>
+    /// A tombstone is dropped only once the server has accepted *that* id.
+    ///
+    /// Upstream clears the whole table after each accepted batch. On a clean run nothing shows:
+    /// the later batches are already in memory and still go out. The damage needs a batch to
+    /// fail — a dropped connection, a logout mid-pass — after which the loop returns with every
+    /// unsent tombstone erased, and those deletions are never retried. Rather than orchestrate a
+    /// mid-pass failure against a live server, this pins the invariant that makes such a failure
+    /// survivable: what gets cleared is exactly what was sent.
+    ///
+    /// Deletions are spread over more than one batch, since with a single batch "clear the whole
+    /// table" and "clear this batch" are the same act and the test would pass either way.
+    /// </summary>
+    [SkippableFact]
+    public void Only_the_ids_the_server_accepted_are_cleared() {
+        using var machine = NewMachine();
+
+        const int count = 150;   // BatchUtil batches at 100
+        var ids = new List<long>();
+        for (var i = 0; i < count; i++) ids.Add(machine.Collection.AddLootedItem($"Doomed Revolver {i}"));
+
+        Assert.True(machine.PumpUntil(() => machine.Collection.Store.GetUnsynchronizedItems().Count == 0),
+            "the items were never uploaded");
+
+        var expected = machine.Collection.Store.GetOnlineIds().ToHashSet(StringComparer.Ordinal);
+        Assert.Equal(count, expected.Count);
+
+        foreach (var id in ids) machine.Collection.TransferAway(id);
+
+        // A real backup service, but watching how it clears.
+        var recorder = new RecordingStore(machine.Collection.Store);
+        AuthService.InvalidateCache();
+        var auth = new AuthService(new AuthenticationProvider(machine.Settings), machine.Collection.Store);
+        var backup = new BackupService(auth, recorder, machine.Settings);
+
+        var deadline = DateTime.UtcNow.AddSeconds(25);
+        while (DateTime.UtcNow < deadline && recorder.Store.GetItemsMarkedForOnlineDeletion().Count > 0) {
+            backup.OnSearch();
+            backup.Execute();
+            Thread.Sleep(1100);
+        }
+
+        Assert.Empty(recorder.Store.GetItemsMarkedForOnlineDeletion());
+
+        // Never the blunt one: that is the call that throws away tombstones for batches which
+        // have not been sent yet.
+        Assert.Equal(0, recorder.ClearedEverything);
+
+        // And between them, the per-batch clears account for every id exactly once.
+        Assert.Equal(count, recorder.ClearedIds.Count);
+        Assert.Equal(expected, recorder.ClearedIds.ToHashSet(StringComparer.Ordinal));
+        Assert.True(recorder.ClearCalls.Count > 1, "the deletions did not span more than one batch");
+    }
+
+    /// <summary>A real store that records how the deletion loop clears its tombstones.</summary>
+    private sealed class RecordingStore(CloudItemStoreHandle store) : ICloudItemStore {
+        public CloudItemStoreHandle Store { get; } = store;
+        public int ClearedEverything { get; private set; }
+        public List<IReadOnlyCollection<string>> ClearCalls { get; } = [];
+        public List<string> ClearedIds => ClearCalls.SelectMany(call => call).ToList();
+
+        public void ClearItemsMarkedForOnlineDeletion() {
+            ClearedEverything++;
+            Store.ClearItemsMarkedForOnlineDeletion();
+        }
+
+        public void ClearItemsMarkedForOnlineDeletion(IReadOnlyCollection<string> ids) {
+            ClearCalls.Add(ids);
+            Store.ClearItemsMarkedForOnlineDeletion(ids);
+        }
+
+        public IList<CloudItem> GetUnsynchronizedItems() => Store.GetUnsynchronizedItems();
+        public void SetAsSynchronized(IList<CloudItem> items) => Store.SetAsSynchronized(items);
+        public IList<string> GetOnlineIds() => Store.GetOnlineIds();
+        public IList<ItemIdentifierDto> GetItemsMarkedForOnlineDeletion() =>
+            Store.GetItemsMarkedForOnlineDeletion();
+        public void Save(IList<CloudItem> items) => Store.Save(items);
+        public void Delete(IList<DeleteItemDto> items) => Store.Delete(items);
+        public void ResetOnlineSyncState() => Store.ResetOnlineSyncState();
     }
 
     /// <summary>

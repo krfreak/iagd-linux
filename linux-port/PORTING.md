@@ -874,6 +874,32 @@ Verified against real records: a revolver and Lokarr's Gaze are kept, Gazer Man 
 another quest torso is refused, and components, potions, scrap, quest items, the salt bag and a
 stack of twelve are all turned away.
 
+### An item the collection already holds is refused — and now says so
+
+Upstream drops a looted item it already has: `ItemClassificationService` asks
+`PlayerItemDao.Exists` and moves the file to `itemqueue/ingoing/deleted` rather than storing it.
+That is reproduced, because the alternative is a collection that grows a copy every time an item
+makes a round trip through the game. Two things about it were this port's own and both were
+wrong.
+
+**The key was too narrow.** Upstream compares base record, both affixes, the socketed component
+and the modifier, plus the seed; this compared base record and seed alone. The same roll with a
+component socketed into it is a different item to upstream and was the same item here, so looting
+one back out of the game threw it away.
+
+**And it happened in silence.** `LootImporter` skipped duplicates without a log line or an event,
+so four items moved into the stash tab arriving as two looked exactly like items being lost in
+transit — which is how this was reported. The hook had looted all four and written all four CSVs;
+the pair that vanished were duplicates of rows the collection already had. Each pass now names
+what it refused, once per pass rather than once per item, since a stash tab emptied in one go can
+hold several copies of the same roll.
+
+Worth stating plainly, because it decides how the whole feature reads: **a refused duplicate is a
+real item leaving the game**. The hook has already taken it out of the stash by the time the host
+sees the file. Upstream keeps the CSV (`ingoing/deleted`), this port keeps it in
+`~/.local/share/iagd-linux/loot-backup`, and either way the copy on disk is the only record that
+it existed.
+
 ### Filtering by mastery
 
 Ticking Occultist returned items with no Occultist line on them — 336 of them in this
@@ -1851,7 +1877,7 @@ Upstream's pacing is reproduced exactly, because all of it is about not being a 
 - **batches are 100**, which is the server's own limit rather than a tuning choice, pinned
   against `api/upload/upload.go` by the verify script.
 
-### One deliberate divergence
+### Two deliberate divergences
 
 `CloudItemStore.Delete` clears more tables than upstream's does. Upstream deletes
 `ComputedItemStat`, `ReplicaItem2` and `PlayerItem`, leaving `ReplicaItemRow` and
@@ -1860,6 +1886,36 @@ primary key, which SQLite makes a rowid alias and reuses, so the next item to ar
 departed item's tooltip lines and records. This port hit that exact bug once already (see
 `LootStore.Delete`) and `Schema.RemoveOrphanedRows` sweeps up after it on every start — so the
 end state is upstream's either way, and deleting the rows inline only closes the window between.
+
+**Tombstones are cleared per batch, not wholesale.** `BackupService.SyncDeletions` batches
+deletions at 100 and upstream clears the entire `deletedplayeritem_v3` table after each batch the
+server accepts. On a clean run that is invisible — the later batches are already in memory and
+still go out. It loses everything the moment a batch does not: a failed request or a logout
+mid-pass returns from the loop with every unsent tombstone already erased, so those deletions are
+never retried, the server keeps items the player deleted here, and the next download hands them
+back. Only reachable with more than one batch pending, which is why it survives upstream and why
+it matters here: collapsing a duplicated collection produced 7,461 at once.
+
+`Only_the_ids_the_server_accepted_are_cleared` pins it, and pins it at the invariant rather than
+at the symptom — orchestrating a mid-pass failure against a live server is fragile, while "what
+was cleared is exactly what was sent" is the property that makes such a failure survivable. It
+fails against upstream's version.
+
+### A merged item keeps its cloud identity
+
+`CollectionMerge` used to mint a fresh `cloudid` for every row it imported, because it inserts
+through `LootStore.Insert` like everything else. For a merge of a collection the account has
+already uploaded, that is the one thing that must not happen: the download deduplicates **by
+cloud id only** (upstream's rule, and the only one available — the server does not compare
+items), so the server's copies come back down as new items and the collection doubles. That is
+not hypothetical; it is what this collection did, 7,455 merged rows meeting 7,720 downloaded
+ones.
+
+An incoming item now carries its own id across, unless this collection is already using that id —
+two rows sharing one makes a later deletion ambiguous, since the tombstone would tell the server
+to remove the item the *other* row still stands for. `cloud_hassync` stays 0 either way: carrying
+the id says "the server may know this item as X", not "the server has it", so the item is still
+offered for upload and the server keys it back to the copy it already holds.
 
 ### Character backup, and what the panel can say about it
 
