@@ -1148,6 +1148,15 @@ function SettingsView({ onSaved, progress }: {
           is not writable.
         </div>
       )}
+      {settings.hook !== null && !settings.hook.gameDataParsed && (
+        <div class="settings__alert">
+          <strong>The hook has not been told Grim Dawn's data was read.</strong> It refuses to
+          loot anything in that state, and says so only in the game — "Item not looted / Grim
+          Dawn not parsed" over the stash. Reading the item database sets it: use Load Database
+          on the Grim Dawn tab. Looting starts working straight away, without restarting the
+          game.
+        </div>
+      )}
       {hookDisagrees && (
         <div class="settings__alert settings__alert--warn">
           The hook is currently using tab {settings.hook!.stashToLootFrom} to loot from and

@@ -7,7 +7,7 @@ namespace IAGrim.Platform;
 /// This port's own settings, in <c>~/.config/iagd-linux/settings.json</c>.
 ///
 /// Deliberately separate from the bridge's <c>settings.json</c> inside the Wine prefix. That
-/// file is upstream's, and the hook DLL reads three keys out of it; it also holds a real
+/// file is upstream's, and the hook DLL reads four keys out of it; it also holds a real
 /// install's cloud credentials. Writing our preferences into someone's prefix would mix two
 /// unrelated lifetimes — see <see cref="BridgeSettings"/>, which touches only the keys the hook
 /// needs and preserves everything else.

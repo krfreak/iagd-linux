@@ -1,4 +1,5 @@
 using System.Net;
+using IAGrim.Core.GameData;
 using IAGrim.Platform;
 
 namespace IAGrim.Host;
@@ -58,19 +59,33 @@ public sealed class HostServer : IAsyncDisposable {
         // The hook only uses file-based IPC when the bridge settings say so, and without it
         // nothing is captured — silently. Doing this on every start rather than once at install
         // time means a prefix rebuilt by Steam repairs itself.
-        if (Bridge is not null) {
-            var applied = BridgeSettings.Apply(Bridge, Settings);
-            if (applied.Error is not null) {
-                Console.Error.WriteLine($"warning: could not configure the hook: {applied.Error}");
-            }
-            else if (applied.Created) {
-                Console.WriteLine($"created {applied.Path} (enabled the hook's Wine mode)");
-            }
-        }
+        if (Bridge is not null) ApplyBridgeSettings(Settings);
 
         // Loopback only. This exposes the player's collection and can push items into their
         // running game; it has no business being reachable from the network.
         _listener.Prefixes.Add(Url);
+    }
+
+    /// <summary>
+    /// Pushes the keys the hook reads into the bridge file, one of which is whether this client
+    /// has read Grim Dawn's data — the hook loots nothing at all until that is true.
+    ///
+    /// Called on start, on a settings change, and again once a parse finishes, since the first
+    /// of those runs before the parse that a fresh install needs.
+    /// </summary>
+    private string? ApplyBridgeSettings(AppSettings settings) {
+        if (Bridge is null) return null;
+
+        var applied = BridgeSettings.Apply(Bridge, settings,
+                                           GameDataStore.HasParsedItems(LinuxPaths.DatabaseFile));
+        if (applied.Error is not null) {
+            Console.Error.WriteLine($"warning: could not configure the hook: {applied.Error}");
+        }
+        else if (applied.Created) {
+            Console.WriteLine($"created {applied.Path} (enabled the hook's Wine mode)");
+        }
+
+        return applied.Error;
     }
 
     /// <summary>
@@ -110,6 +125,10 @@ public sealed class HostServer : IAsyncDisposable {
         _listener.Start();
         AutoAttach = Bridge is null ? null : new AutoAttachService(Bridge);
         GameData = new GameDataRefresh(events);
+
+        // A parse is the only thing that flips the hook's "Grim Dawn parsed" gate, and every way
+        // of starting one ends up here — startup staleness, a settings change, Load Database.
+        GameData.OnParsed = () => ApplyBridgeSettings(Settings);
 
         _importer = LootImporter.RunAsync(Bridge, collection, events, transfers,
                                           GameClock.StartTime, () => Settings, AutoAttach,
@@ -173,8 +192,7 @@ public sealed class HostServer : IAsyncDisposable {
             _ = GameData?.StartAsync(dir, settings.Language, _shutdown.Token);
         }
 
-        if (Bridge is null) return null;
-        return BridgeSettings.Apply(Bridge, settings).Error;
+        return ApplyBridgeSettings(settings);
     }
 
     /// <summary>Blocks until the server stops, for the headless entry point.</summary>

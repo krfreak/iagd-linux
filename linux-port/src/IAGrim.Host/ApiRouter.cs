@@ -680,6 +680,7 @@ public sealed class ApiRouter {
                 wineModeEnabled = hook.Value.WineMode,
                 stashToLootFrom = hook.Value.LootFrom,
                 stashToDepositTo = hook.Value.DepositTo,
+                gameDataParsed = hook.Value.Parsed,
             },
         };
     }

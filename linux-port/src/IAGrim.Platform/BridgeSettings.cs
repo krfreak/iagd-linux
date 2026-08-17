@@ -4,7 +4,7 @@ using System.Text.Json.Nodes;
 namespace IAGrim.Platform;
 
 /// <summary>
-/// The three keys the hook DLL reads out of <c>settings.json</c> in the bridge directory.
+/// The four keys the hook DLL reads out of <c>settings.json</c> in the bridge directory.
 ///
 /// **This is not optional configuration — it is what makes the hook work at all.** The DLL only
 /// switches to file-based IPC when <c>persistent.isRunningInWine</c> is true; without it, it
@@ -18,6 +18,13 @@ namespace IAGrim.Platform;
 /// | <c>persistent.isRunningInWine</c> | Must be true; switches the DLL to file IPC |
 /// | <c>local.stashToLootFrom</c> | Stash tab index to take from, 0 = last |
 /// | <c>local.stashToDepositTo</c> | Stash tab index to place into, 0 = last |
+/// | <c>local.isGrimDawnParsed</c> | Must be true, or the hook rejects every item |
+///
+/// That last one is as load-bearing as Wine mode and fails just as quietly. Missing means false
+/// (<c>SettingsReader.cpp</c> defaults that way), and the hook's first check on every item is
+/// <c>InventorySack_AddItem::IsRelevant</c>, which pops "Item not looted / Grim Dawn not parsed"
+/// over the game and drops the item on the floor. A prefix that has also run the Windows tool
+/// already has the key, which is exactly why this was easy to miss.
 ///
 /// Everything else in the file is left exactly as found. That matters: on a machine that has
 /// run the Windows tool, this file holds its cloud credentials and window geometry, and
@@ -35,7 +42,12 @@ public static class BridgeSettings {
     /// Safe to call on every startup: it rewrites only when a value actually differs, so it does
     /// not churn a file the Windows tool may also be watching.
     /// </summary>
-    public static Result Apply(PrefixBridge bridge, AppSettings settings) {
+    /// <param name="isGrimDawnParsed">
+    /// Whether this client has read Grim Dawn's data. Call again when that becomes true — the
+    /// hook re-reads the key for every item it rejects (<c>InventorySack_AddItem.cpp</c>), so
+    /// looting starts working without restarting the game.
+    /// </param>
+    public static Result Apply(PrefixBridge bridge, AppSettings settings, bool isGrimDawnParsed) {
         var path = bridge.SettingsFile;
 
         JsonObject root;
@@ -70,6 +82,14 @@ public static class BridgeSettings {
         changed |= SetIfDifferent(local, "stashToLootFrom", settings.StashToLootFrom);
         changed |= SetIfDifferent(local, "stashToDepositTo", settings.StashToDepositTo);
 
+        // Raised to true, never lowered. False is what the hook already assumes when the key is
+        // absent, so writing it buys nothing — while a prefix that has also run the Windows tool
+        // holds *its* answer here, and stamping false over that would stop the hook looting for
+        // a client whose database is perfectly well parsed. The startup order makes that a live
+        // risk rather than a theoretical one: the first Apply of a session runs before this
+        // client's own parse has had a chance to happen.
+        if (isGrimDawnParsed) changed |= SetIfDifferent(local, "isGrimDawnParsed", true);
+
         if (!changed) return new Result(false, false, path, null);
 
         try {
@@ -91,7 +111,7 @@ public static class BridgeSettings {
     /// Reads back what the hook will actually see, for diagnostics. Deliberately narrow: the
     /// rest of this file is none of our business and some of it is credentials.
     /// </summary>
-    public static (bool WineMode, int LootFrom, int DepositTo)? Read(PrefixBridge bridge) {
+    public static (bool WineMode, int LootFrom, int DepositTo, bool Parsed)? Read(PrefixBridge bridge) {
         try {
             if (!File.Exists(bridge.SettingsFile)) return null;
             var root = JsonNode.Parse(File.ReadAllText(bridge.SettingsFile)) as JsonObject;
@@ -100,7 +120,8 @@ public static class BridgeSettings {
             return (
                 root["persistent"]?["isRunningInWine"]?.GetValue<bool>() ?? false,
                 root["local"]?["stashToLootFrom"]?.GetValue<int>() ?? 0,
-                root["local"]?["stashToDepositTo"]?.GetValue<int>() ?? 0);
+                root["local"]?["stashToDepositTo"]?.GetValue<int>() ?? 0,
+                root["local"]?["isGrimDawnParsed"]?.GetValue<bool>() ?? false);
         }
         catch (Exception ex) when (ex is JsonException or IOException or InvalidOperationException
                                           or FormatException) {

@@ -26,6 +26,13 @@ public sealed class GameDataRefresh {
     public string? Step { get; private set; }
 
     /// <summary>
+    /// Raised after a parse succeeds. The host uses it to tell the hook that Grim Dawn has been
+    /// read: until it knows, it refuses to loot anything, and a fresh install only ever reaches
+    /// that state here — long after the settings were last written.
+    /// </summary>
+    public Action? OnParsed { get; set; }
+
+    /// <summary>
     /// Parses <paramref name="gameDir"/> in the background. Returns immediately; the collection
     /// stays readable throughout, and the analysis pass that has to follow is run for you.
     /// </summary>
@@ -56,6 +63,11 @@ public sealed class GameDataRefresh {
                 await BroadcastAsync(
                     $"Read {result.Templates:N0} item(s), {result.Skills:N0} skill(s) and "
                     + $"{result.Icons:N0} icon(s) from Grim Dawn.", cancellationToken);
+
+                // Before the analysis pass, not after: the hook only needs the item table, and
+                // this is what lets a first-run install start looting without a restart.
+                try { OnParsed?.Invoke(); }
+                catch (Exception ex) { Console.Error.WriteLine($"could not configure the hook: {ex.Message}"); }
 
                 // A parse clears the game's stat rows and every rolled value with them, so the
                 // analysis pass has to follow it. Upstream does the same, and doing it here is

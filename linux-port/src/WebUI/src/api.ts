@@ -398,6 +398,11 @@ export interface Settings {
     wineModeEnabled: boolean;
     stashToLootFrom: number;
     stashToDepositTo: number;
+    /**
+     * Whether the hook believes Grim Dawn's data has been read. It refuses to loot anything
+     * until this is true, saying so only as a message over the game.
+     */
+    gameDataParsed: boolean;
   } | null;
 }
 

@@ -923,7 +923,8 @@ internal static class Program {
         // What the hook will read, which is the thing that actually governs behaviour.
         try {
             var (_, bridge) = Resolve();
-            var applied = BridgeSettings.Apply(bridge, settings);
+            var applied = BridgeSettings.Apply(bridge, settings,
+                                               GameDataStore.HasParsedItems(LinuxPaths.DatabaseFile));
             var hook = BridgeSettings.Read(bridge);
 
             Console.WriteLine();
@@ -939,6 +940,7 @@ internal static class Program {
             Console.WriteLine($"  wine mode         {(hook.Value.WineMode ? "enabled" : "DISABLED — the hook will not capture loot")}");
             Console.WriteLine($"  stashToLootFrom   {hook.Value.LootFrom}");
             Console.WriteLine($"  stashToDepositTo  {hook.Value.DepositTo}");
+            Console.WriteLine($"  grim dawn parsed  {(hook.Value.Parsed ? "yes" : "NO — the hook will reject every item")}");
         }
         catch (DirectoryNotFoundException) {
             Console.WriteLine();

@@ -292,6 +292,30 @@ public sealed class GameDataStore : IDisposable {
         return Convert.ToInt32(command.ExecuteScalar());
     }
 
+    public int DatabaseItemCount() {
+        using var command = _connection.CreateCommand();
+        command.CommandText = "SELECT COUNT(*) FROM DatabaseItem_v2;";
+        return Convert.ToInt32(command.ExecuteScalar());
+    }
+
+    /// <summary>
+    /// Whether Grim Dawn's data has been read at all — upstream's <c>local.isGrimDawnParsed</c>,
+    /// derived the same way it does (<c>databaseItemDao.GetRowCount() &gt; 0</c>, StartupService).
+    ///
+    /// The hook refuses to loot anything while that key is false, so this answer ends up in the
+    /// bridge file; see <c>BridgeSettings</c>. Failing to open the database means nothing has
+    /// been parsed into it, which is the same answer.
+    /// </summary>
+    public static bool HasParsedItems(string databasePath) {
+        try {
+            using var store = new GameDataStore(databasePath);
+            return store.DatabaseItemCount() > 0;
+        }
+        catch (Exception ex) when (ex is SqliteException or IOException or UnauthorizedAccessException) {
+            return false;
+        }
+    }
+
     /// <summary>
     /// Records what a parse was made from, so staleness can be detected rather than guessed at.
     /// </summary>
