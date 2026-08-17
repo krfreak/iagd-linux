@@ -3,10 +3,10 @@
 # Push a tag to release:  git tag v2026.08.17 && git push origin v2026.08.17
 # Or run it by hand from the Actions tab, which builds the same artifacts without releasing.
 #
-# The build is the one in the Makefile, not a re-implementation of it: the runner installs the
-# toolchains the hook, the injector and the .NET app need, and then runs `make package`. If this
-# workflow and a local `make package` ever disagree, the difference is in the installed packages
-# below and nowhere else.
+# The build is the one in the Makefile, not a re-implementation of it: this assembles the
+# toolchains the hook, the injector and the .NET app need, and then runs the Makefile's own
+# targets. If a release and a local `make package` ever disagree, the difference is in what is
+# installed below and nowhere else.
 
 name: Release
 
@@ -32,7 +32,7 @@ jobs:
 
     steps:
       - name: Check out, with the pinned submodules
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           # scripts/prepare.sh unpacks the hook and the injector from these, and
           # packaging/make-icon.sh takes the application icon out of upstream's gd.ico. Their
@@ -57,18 +57,18 @@ jobs:
           rm appimagetool
           appimagetool --version
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '10.0.x'
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
           cache: npm
           cache-dependency-path: linux-port/src/WebUI/package-lock.json
 
       - name: Cache NuGet packages
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
           key: nuget-${{ runner.os }}-${{ hashFiles('linux-port/**/*.csproj') }}
@@ -122,7 +122,7 @@ jobs:
       - name: List what was built
         run: ls -lh linux-port/packaging/out
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: iagd-${{ steps.version.outputs.version }}-x86_64
           path: |
