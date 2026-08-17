@@ -72,7 +72,7 @@ public sealed class AuthService : IDisposable {
     /// </summary>
     public static AccessStatus IsTokenValid(string user, string token) {
         try {
-            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+            using var client = CloudHttp.Create(TimeSpan.FromSeconds(5));
             client.DefaultRequestHeaders.TryAddWithoutValidation("Authorization", token);
             client.DefaultRequestHeaders.TryAddWithoutValidation("X-Api-User", user);
 
@@ -155,7 +155,7 @@ public sealed class AuthService : IDisposable {
         var numErrors = 0;
         var numRuns = 0;
 
-        using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+        using var client = CloudHttp.Create(TimeSpan.FromSeconds(5));
         try {
             while (!_isDisposing && numRuns++ < 240) {
                 Thread.Sleep(2000);
@@ -241,7 +241,7 @@ public sealed class AuthService : IDisposable {
         try {
             if (!_authenticationProvider.HasToken()) return;
 
-            using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+            using var client = CloudHttp.Create(TimeSpan.FromSeconds(5));
             client.DefaultRequestHeaders.TryAddWithoutValidation("Authorization", _authenticationProvider.GetToken());
             client.DefaultRequestHeaders.TryAddWithoutValidation("X-Api-User", _authenticationProvider.GetUser());
             client.GetAsync(CloudUris.LogoutUrl).GetAwaiter().GetResult();
@@ -275,7 +275,7 @@ public sealed class AuthService : IDisposable {
             AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate,
         };
 
-        var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(5) };
+        var client = CloudHttp.Create(TimeSpan.FromSeconds(5), handler);
         client.DefaultRequestHeaders.TryAddWithoutValidation("Authorization", _authenticationProvider.GetToken());
         client.DefaultRequestHeaders.TryAddWithoutValidation("X-Api-User", _authenticationProvider.GetUser());
         return new RestService(client);

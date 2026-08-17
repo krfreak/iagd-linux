@@ -46,6 +46,11 @@ public sealed class CloudWorker : IDisposable {
         _settings = settings;
         _events = events;
 
+        // Who this installation is, for the user agent every cloud request carries. Resolved
+        // here because this is where the settings that own it already are — reloading them
+        // inside the cloud code would risk saving a stale copy over someone's changes.
+        CloudHttp.ClientId = ClientIdentity.Resolve(settings);
+
         // The environment is fixed at construction. IAGD_CLOUD_ENV=localdev points everything at
         // a server on this machine, which is how this feature is developed without sending a
         // single request to the service the real account lives on.

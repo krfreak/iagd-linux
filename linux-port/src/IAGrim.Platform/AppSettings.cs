@@ -92,6 +92,20 @@ public sealed class AppSettings : ICloudSettings {
     /// <inheritdoc />
     public DateTime LastCharSyncUtc { get; set; }
 
+    /// <summary>
+    /// This installation's own identity, minted once and then never changed.
+    ///
+    /// Upstream keeps one of these too (<c>persistent.uuid</c>) but only ever sends it with a
+    /// crash report, which this port does not do. Here it rides along in the user agent, so a
+    /// run of the port is attributable to an installation rather than to Linux in general.
+    ///
+    /// It lives in this file specifically so that it survives what a machine identifier must
+    /// survive: rebuilding, reinstalling the AppImage, and Steam recreating the Wine prefix.
+    /// Nothing derives it from the hardware, so copying this file to another machine copies the
+    /// identity, which is the same bargain upstream makes.
+    /// </summary>
+    public string? ClientId { get; set; }
+
     // ---------------------------------------------------------------- persistence
 
     private static readonly JsonSerializerOptions Json = new() {

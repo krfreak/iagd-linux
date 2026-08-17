@@ -124,6 +124,7 @@ public sealed class WebSocketSyncService : IDisposable {
         var socket = new ClientWebSocket();
         socket.Options.SetRequestHeader("Authorization", _authenticationProvider.GetToken());
         socket.Options.SetRequestHeader("X-Api-User", _authenticationProvider.GetUser());
+        socket.Options.SetRequestHeader("User-Agent", CloudHttp.UserAgent);
         socket.ConnectAsync(new Uri(CloudUris.WebSocketUrl), _cts.Token).GetAwaiter().GetResult();
         _socket = socket;
     }

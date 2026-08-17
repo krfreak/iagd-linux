@@ -304,7 +304,7 @@ public sealed class CharacterBackupService {
         if (authProvider is null) return false;
 
         try {
-            using var client = new HttpClient { Timeout = TimeSpan.FromMinutes(2) };
+            using var client = CloudHttp.Create(TimeSpan.FromMinutes(2));
             client.DefaultRequestHeaders.TryAddWithoutValidation("Authorization", authProvider.GetToken());
             client.DefaultRequestHeaders.TryAddWithoutValidation("X-Api-User", authProvider.GetUser());
 
