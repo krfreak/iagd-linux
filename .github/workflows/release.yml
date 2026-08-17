@@ -188,13 +188,10 @@ jobs:
         run: |
           cd linux-port/packaging/out
           sha256sum *.AppImage *.tar.gz > SHA256SUMS
-          gh release create "$TAG" \
-            --target "$GITHUB_SHA" \
-            --title "Item Assistant for Grim Dawn $VERSION" \
-            --notes-file - \
-            "iagd-$VERSION-x86_64.AppImage" \
-            "iagd-$VERSION-linux-x64.tar.gz" \
-            SHA256SUMS <<'NOTES'
+
+          # The notes go to a file rather than down a here-document into gh, because the retry
+          # below would find stdin already consumed on the second attempt.
+          cat > notes.md <<'NOTES'
           A self-contained build of the Linux port. Nothing else to install — the .NET runtime
           travels with it — with one exception the app checks for and reports:
 
@@ -214,3 +211,32 @@ jobs:
           AppImage: extract it and run `iagd.AppDir/AppRun`. The headless host
           (`usr/bin/iagd-host`) needs no WebKitGTK at all.
           NOTES
+
+          assets=("iagd-$VERSION-x86_64.AppImage" "iagd-$VERSION-linux-x64.tar.gz" SHA256SUMS)
+
+          # One API call stood between a finished build and a release, and on 2026-08-17 it
+          # returned 503 during a GitHub incident — throwing away a build that had succeeded in
+          # every other respect. Retried rather than reported, because there is nothing for a
+          # person to decide here: the artifacts are built, the version is chosen, and the only
+          # question is whether the service is answering yet.
+          #
+          # Creating and uploading are separate cases on purpose. If an attempt creates the
+          # release and then fails partway through the uploads, creating it again returns
+          # "already exists" forever; the assets are what is missing, so finish those instead.
+          for attempt in 1 2 3 4 5; do
+              if gh release view "$TAG" >/dev/null 2>&1; then
+                  gh release upload "$TAG" --clobber "${assets[@]}" && exit 0
+              elif gh release create "$TAG" \
+                     --target "$GITHUB_SHA" \
+                     --title "Item Assistant for Grim Dawn $VERSION" \
+                     --notes-file notes.md \
+                     "${assets[@]}"; then
+                  exit 0
+              fi
+
+              echo "::warning::release attempt $attempt failed; retrying"
+              sleep "$((attempt * 20))"
+          done
+
+          echo "::error::could not publish $TAG after 5 attempts" >&2
+          exit 1
