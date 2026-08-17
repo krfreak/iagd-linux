@@ -31,7 +31,9 @@ WORKSPACE="$(dirname "$LINUX_PORT")"
 
 OUT="$LINUX_PORT/packaging/out"
 APPDIR="$OUT/iagd.AppDir"
-VERSION="$(date +%Y.%m.%d)"
+# The date is the version for a local build, where nothing else names it. A release is built
+# from a tag, and the tag is the better name — so the caller may override it.
+VERSION="${VERSION:-$(date +%Y.%m.%d)}"
 RID="linux-x64"
 
 say() { printf '\n\033[1m%s\033[0m\n' "$*"; }
