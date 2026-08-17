@@ -67,17 +67,17 @@ jobs:
           cache: npm
           cache-dependency-path: linux-port/src/WebUI/package-lock.json
 
-      # The generation prefix exists to be bumped. A cache saved from a run whose restore was
-      # interrupted is restored by every later run through restore-keys, and no replacement is
-      # ever saved while the primary key keeps missing — so a half-written packages folder
-      # repeats the same failure forever. Bumping it is how that loop is broken; nothing else
-      # here reads the number.
+      # The generation prefix exists to be bumped, if a cache ever needs abandoning. It was
+      # bumped once on the theory that a half-written packages folder was being reused forever,
+      # and the run history says otherwise: the first run this repository ever made restored
+      # from an empty cache and passed. Bumped back, because the last green build restored from
+      # this key and there is no evidence against it.
       - name: Cache NuGet packages
         uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
-          key: nuget2-${{ runner.os }}-${{ hashFiles('linux-port/**/*.csproj') }}
-          restore-keys: nuget2-${{ runner.os }}-
+          key: nuget-${{ runner.os }}-${{ hashFiles('linux-port/**/*.csproj') }}
+          restore-keys: nuget-${{ runner.os }}-
 
       # A tag names the build; a manual run falls back to the script's own date-based version.
       - name: Decide the version

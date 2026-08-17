@@ -65,9 +65,9 @@ PROJECTS="src/IAGrim.App/IAGrim.App.csproj tools/iagd/iagd.csproj src/IAGrim.Hos
 # no package, no source and no path. Standing it up as its own step at normal verbosity means
 # the log names what it was fetching when it died.
 #
-# --disable-parallel for the same reason. Restoring one package at a time is slower and is what
-# a starved machine can actually complete; the silent-failure shape above is what a CI runner
-# produces when the parallel restore hits a resource limit rather than a NuGet error.
+# Configuration=Release because the publishes that consume this restore with --no-restore are
+# Release, and restoring under a different configuration is asking two halves of one build to
+# disagree about what was resolved.
 #
 # IAGD_RESTORE_BINLOG_DIR turns on a binary log per project. It exists because the failure this
 # is chasing logs nothing the console can show: NuGet reports every project as "Failed to
@@ -85,7 +85,8 @@ for project in $PROJECTS; do
     fi
 
     dotnet restore "$LINUX_PORT/$project" -r "$RID" -p:SelfContained=true \
-        --disable-parallel --nologo -v "${IAGD_RESTORE_VERBOSITY:-normal}" "${binlog[@]}"
+        -p:Configuration=Release \
+        --nologo -v "${IAGD_RESTORE_VERBOSITY:-normal}" "${binlog[@]}"
 done
 
 say "Publishing (self-contained, $RID)"
