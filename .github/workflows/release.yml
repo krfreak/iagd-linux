@@ -15,6 +15,11 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      release:
+        description: 'Tag this build and publish it as a release'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -79,15 +84,20 @@ jobs:
           key: nuget-${{ runner.os }}-${{ hashFiles('linux-port/**/*.csproj') }}
           restore-keys: nuget-${{ runner.os }}-
 
-      # A tag names the build; a manual run falls back to the script's own date-based version.
+      # A tag is the authority on its own name. Otherwise the next unused version for today,
+      # computed from the tags that already exist — which is why the checkout above needs its
+      # history: a shallow one has no tags to count and would reuse .1 forever.
       - name: Decide the version
         id: version
         run: |
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
-            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+            version="${GITHUB_REF_NAME#v}"
           else
-            echo "version=$(date +%Y.%m.%d)" >> "$GITHUB_OUTPUT"
+            version="$(linux-port/scripts/next-version.sh)"
           fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          echo "Building $version"
 
       - name: Unpack the patched hook and injector sources
         run: scripts/prepare.sh
@@ -160,15 +170,26 @@ jobs:
             linux-port/packaging/out/*.tar.gz
           if-no-files-found: error
 
+      # Two ways in. Pushing a tag releases it, as before. A manual run releases only when asked
+      # for one, so that dispatching a build to test something does not cut a release nobody
+      # wanted — which is otherwise exactly what would happen, since every dispatch now computes
+      # a fresh version.
+      #
+      # gh creates the tag itself, at the commit that was built (--target). Doing it that way
+      # rather than pushing a tag from here also avoids re-entering this workflow: a push made
+      # with the job's own token does not trigger another run, but not relying on that rule at
+      # all is simpler than remembering it.
       - name: Publish the release
-        if: github.ref_type == 'tag'
+        if: github.ref_type == 'tag' || inputs.release
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
         run: |
           cd linux-port/packaging/out
           sha256sum *.AppImage *.tar.gz > SHA256SUMS
-          gh release create "$GITHUB_REF_NAME" \
+          gh release create "$TAG" \
+            --target "$GITHUB_SHA" \
             --title "Item Assistant for Grim Dawn $VERSION" \
             --notes-file - \
             "iagd-$VERSION-x86_64.AppImage" \

@@ -31,9 +31,10 @@ WORKSPACE="$(dirname "$LINUX_PORT")"
 
 OUT="$LINUX_PORT/packaging/out"
 APPDIR="$OUT/iagd.AppDir"
-# The date is the version for a local build, where nothing else names it. A release is built
-# from a tag, and the tag is the better name — so the caller may override it.
-VERSION="${VERSION:-$(date +%Y.%m.%d)}"
+# What this build calls itself. The caller wins — a release is built from a tag, and the tag is
+# the authority on its own name. Otherwise the next unused version for today, so that two builds
+# on one day are distinguishable rather than both claiming the date.
+VERSION="${VERSION:-$("$LINUX_PORT/scripts/next-version.sh")}"
 RID="linux-x64"
 
 say() { printf '\n\033[1m%s\033[0m\n' "$*"; }
@@ -96,10 +97,13 @@ say "Publishing (self-contained, $RID)"
 #
 # Separate output directories because the desktop app and the CLI both publish an executable
 # named "iagd" — sharing one directory silently leaves whichever was published last.
+#
+# -p:Version stamps the assemblies, which is where the cloud client reads the version it
+# announces to the sync service. Without it every build would introduce itself as 1.0.0.
 publish() {
     dotnet publish "$LINUX_PORT/$1" \
         -c Release -r "$RID" --self-contained true --no-restore \
-        -p:PublishTrimmed=false -p:PublishSingleFile=false \
+        -p:PublishTrimmed=false -p:PublishSingleFile=false -p:Version="$VERSION" \
         -o "$APPDIR/usr/lib/iagd/$2" --nologo -v q
 }
 
