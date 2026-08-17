@@ -57,6 +57,23 @@ fi
 rm -rf "$APPDIR"
 mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/share/iagd"
 
+PROJECTS="src/IAGrim.App/IAGrim.App.csproj tools/iagd/iagd.csproj src/IAGrim.Host/IAGrim.Host.csproj"
+
+# Restored on its own, before anything is published, because a restore that fails *inside*
+# `dotnet publish` is unactionable: NuGet's task returns false without logging why, and all the
+# build reports is "MSB4181: The RestoreTask task returned false but did not log an error" with
+# no package, no source and no path. Standing it up as its own step at normal verbosity means
+# the log names what it was fetching when it died.
+#
+# --disable-parallel for the same reason. Restoring one package at a time is slower and is what
+# a starved machine can actually complete; the silent-failure shape above is what a CI runner
+# produces when the parallel restore hits a resource limit rather than a NuGet error.
+say "Restoring packages"
+for project in $PROJECTS; do
+    dotnet restore "$LINUX_PORT/$project" -r "$RID" -p:SelfContained=true \
+        --disable-parallel --nologo
+done
+
 say "Publishing (self-contained, $RID)"
 # Self-contained so the package does not require a .NET install. Trimming is deliberately off:
 # the ARZ/ARC parsers and the SQLite driver reach for types reflectively, and a trimmed build
@@ -66,7 +83,7 @@ say "Publishing (self-contained, $RID)"
 # named "iagd" — sharing one directory silently leaves whichever was published last.
 publish() {
     dotnet publish "$LINUX_PORT/$1" \
-        -c Release -r "$RID" --self-contained true \
+        -c Release -r "$RID" --self-contained true --no-restore \
         -p:PublishTrimmed=false -p:PublishSingleFile=false \
         -o "$APPDIR/usr/lib/iagd/$2" --nologo -v q
 }
