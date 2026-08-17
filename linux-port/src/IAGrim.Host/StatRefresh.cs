@@ -83,7 +83,7 @@ public static class StatRefresh {
             using var connection = new SqliteConnection($"Data Source={databasePath}");
             connection.Open();
 
-            var renamed = ItemNameRefresh.Run(connection);
+            var renamed = ItemNameRefresh.Run(connection, null, line => Console.WriteLine($"names: {line}."));
             if (renamed > 0) Console.WriteLine($"names: rewrote {renamed:N0} item name(s) from the game data.");
             return renamed;
         }

@@ -1451,6 +1451,44 @@ composed empty string is not an improvement on a stale name, and blanking it wou
 out of the name search entirely — so the `UPDATE`s use `IFNULL($name, Name)` rather than writing
 unconditionally.
 
+#### A name needs a core — the one place this parts from upstream
+
+"Cannot be named" is not only the empty composition. **An item is called what its base record
+says it is**; the affixes, the quality and the style decorate that name and the socketed
+component is not part of it at all. When the base record is missing from the parsed game data,
+its affixes are still there — an affix is a vanilla record shared across mods, and a modded base
+is not — so upstream's `GetItemName` returns the decoration on its own. A magical two-handed mace
+the game named *Ancient Warmaul of Ruin* was stored as **`of Ruin`**, and one carrying a prefix
+instead as **`Mighty`**.
+
+Upstream writes that name unconditionally, so this is a divergence, and it is deliberate. It is
+the same rule as the `IFNULL` above rather than a new one: `ItemNameComposer` returns `""` when
+the core is empty, and every caller already reads `""` as "keep the name it has". Three things
+make it safe:
+
+- It cannot cost a legitimate name. Across the 38,156 records of a vanilla + Reign of Terror +
+  D2 + Owlheart installation, **no record carries a quality or style tag without also carrying a
+  name tag**, so an empty core means an unnameable base record and nothing else. Measured, not
+  assumed.
+- Upstream never reaches the bad case with anything to lose. This port has a name for such an
+  item that upstream does not — the game's own tooltip, via `AttachReplica` — and that is
+  precisely what the crop was overwriting.
+- The damage was permanent and silent. The sweep agrees with a cropped name (composition returns
+  `""`, so the row is skipped), rarity and level still look right because those are read across
+  *all* of an item's records at once and the affix supplies both, and `AttachReplica` only fills
+  a name column that is empty. Nothing would ever have asked about the item again.
+
+**Cropped names are also repaired, not merely avoided.** They arrive as readily as they were
+written — through a merge, through the online backup, from the Windows tool, from a collection
+written before this guard — so `ItemNameRefresh` recognises one by composing the affixes alone
+and comparing (`ItemNameComposer.AffixOnlyName`, which shares its implementation with `Compose`
+so the two cannot drift). A match is restored from the item's stored tooltip, which is the same
+fallback `AttachReplica` uses for an unparsed record, so the item lands where it would have been
+had the crop never happened. An item with no tooltip keeps the affix: there is nothing better to
+give it, blanking it would lose it from the search, and parsing the mod its base record comes
+from repairs it properly at the next sweep. The sweep now also runs after a **merge**, which had
+been relying on the stat pass — and that pass needs a game folder, while this does not.
+
 Two consequences worth stating:
 
 - **The tooltip is a fallback, not a source.** `AttachReplica` fills the name column only when it

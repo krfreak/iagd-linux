@@ -224,6 +224,15 @@ public sealed class ApiRouter {
                                 statsNote = $"The items were added, but computing their values failed: {ex.Message}";
                             }
                         }
+
+                        // Names last, and unconditionally: the merged rows carry whatever the
+                        // other collection called them, which is the moment this port composes
+                        // a name of its own — and the moment a name that another client cropped
+                        // to an affix would otherwise settle in for good. It is the sweep the
+                        // online backup already runs for the same reason, it costs 150-190 ms,
+                        // and unlike the pass above it needs no game folder, so it is also what
+                        // covers a merge done before one is set.
+                        StatRefresh.RefreshNames(LinuxPaths.DatabaseFile);
                     }
 
                     // Let the final progress frame land before the completion message, so the bar

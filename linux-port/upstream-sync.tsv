@@ -35,6 +35,7 @@ IAGrim/Services/ItemStats/SeedStatCalculator.cs	src/IAGrim.Core/ItemStats/SeedSt
 IAGrim/Services/Dto/DBSTatRow.cs	src/IAGrim.Core/ItemStats/DBStatRow.cs	Stat row DTO the engine consumes
 IAGrim/Database/DAO/DatabaseItemStatDaoImpl.cs	src/IAGrim.Core/ItemStats/StatFilter.cs	Stat blacklist/whitelist gating what reaches the seed engine (verify-stat-filter.sh)
 IAGrim/Database/DAO/Util/ItemOperationsUtility.cs	src/IAGrim.Core/ItemStats/ItemRarity.cs	Classification-to-display-colour map and level requirement (verify-item-rarity.sh)
+IAGrim/Database/DAO/Util/ItemOperationsUtility.cs	src/IAGrim.Core/ItemStats/ItemNameComposer.cs	GetItemName: tag selection and prefix/quality/style/name/suffix ordering (one deliberate divergence -- see PORTING.md)
 IAGrim/Database/DAO/PlayerItemDaoImpl.cs	src/IAGrim.Core/ItemStats/ItemRarity.cs	"Level of green" affix counting and GetRecordsForItem (verify-item-rarity.sh)
 IAGrim/Parsers/Arz/ComplexItemParser.cs	src/IAGrim.Core/GameData/SkillParser.cs	Item-to-granted-skill resolution, including the buffSkillName indirection
 IAGrim/Database/DAO/ItemSkillDaoImpl.cs	src/IAGrim.Host/ItemQuery.cs	Grants-skill and summoner filter semantics

@@ -88,6 +88,53 @@ public sealed class ItemNameComposer {
     public string Compose(IReadOnlyDictionary<string, List<DBStatRow>> stats,
                           string? baseRecord, string? prefixRecord,
                           string? suffixRecord, string? materiaRecord) {
+        var (core, name) = ComposeParts(stats, baseRecord, prefixRecord, suffixRecord, materiaRecord);
+
+        // The base record is what an item is *called*. The affixes, the quality and the style
+        // only decorate that name, and the component is not part of it at all. When the base
+        // record is not in the parsed game data its affixes still resolve — an affix is a
+        // vanilla record shared across mods, and a modded base is not — so what comes out is the
+        // decoration on its own: a magical item the game named "Ancient Warmaul of Ruin" was
+        // stored as "of Ruin", and one carrying a prefix instead as "Mighty".
+        //
+        // That is the case the component check in ComposeParts already covers, reached by the
+        // other half of the same item, and it takes the same answer. "" is how this class says
+        // the game data cannot name this item, and every caller reads it as "keep the name it
+        // has" — their IFNULL, and the empty check in ItemNameRefresh.
+        //
+        // It costs nothing on a described item: across the 38,156 records of a vanilla + Reign
+        // of Terror + D2 + Owlheart installation, no record carries a quality or style tag
+        // without also carrying a name tag, so an empty core means an unnameable base record
+        // rather than an item this drops a legitimate name for.
+        return core.Length == 0 ? string.Empty : name;
+    }
+
+    /// <summary>
+    /// What an item's decoration composes to on its own, and the empty string for an item whose
+    /// base record *is* named — which is every healthy item.
+    ///
+    /// This is the name <see cref="Compose"/> returned before it required a core, so it is also
+    /// the name already sitting in collections written by that version, by the Windows tool, and
+    /// by any other client sharing the flaw. It exists so <see cref="ItemNameRefresh"/> can
+    /// recognise one when it arrives — through a merge, through the online backup, or through an
+    /// upgrade — rather than only avoiding writing new ones.
+    /// </summary>
+    public string AffixOnlyName(IReadOnlyDictionary<string, List<DBStatRow>> stats,
+                                string? baseRecord, string? prefixRecord,
+                                string? suffixRecord, string? materiaRecord) {
+        var (core, name) = ComposeParts(stats, baseRecord, prefixRecord, suffixRecord, materiaRecord);
+        return core.Length == 0 ? name : string.Empty;
+    }
+
+    /// <summary>
+    /// Upstream's <c>GetItemName</c>, unchanged, plus the core it was built around so the callers
+    /// above can tell "the game data named this" from "the game data only decorated it". Both go
+    /// through here so the two answers cannot drift apart.
+    /// </summary>
+    private (string Core, string Name) ComposeParts(
+                          IReadOnlyDictionary<string, List<DBStatRow>> stats,
+                          string? baseRecord, string? prefixRecord,
+                          string? suffixRecord, string? materiaRecord) {
         // Upstream's GetItemName, step for step. The records are looked at in its order, and a
         // tag is matched to the record it came from rather than to the first record carrying it:
         // base and affix records both have a name field, and taking either would name a green
@@ -128,12 +175,12 @@ public sealed class ItemNameComposer {
         // item whose base record is unparsed still has a socketed *vanilla* component, which is
         // parsed, so the bracket resolved when nothing else did and "Modded Blade" was rewritten
         // to " [Antivenom Salve]" — the component's name in place of the item's.
-        if (string.IsNullOrWhiteSpace(name)) return string.Empty;
+        if (string.IsNullOrWhiteSpace(name)) return (core, string.Empty);
 
         // The socketed component, which upstream appends in brackets rather than ordering with
         // the rest. Its own UI splits the brackets back off to draw the component separately.
         var entry = tagEntries.FirstOrDefault(row => row.Record == materiaRecord && row.Stat == "description");
 
-        return entry is null ? name : $"{name} [{TagName(entry.TextValue) ?? entry.TextValue}]";
+        return (core, entry is null ? name : $"{name} [{TagName(entry.TextValue) ?? entry.TextValue}]");
     }
 }

@@ -192,6 +192,118 @@ public class ItemNameTests : IDisposable {
     }
 
     /// <summary>
+    /// The same again, with an affix instead of a component — the case a player actually
+    /// reported. A magical item has exactly one affix, that affix is a vanilla record and so is
+    /// parsed even when the modded base record it sits on is not, and the composed name was the
+    /// affix on its own: the game's "Ancient Warmaul of Ruin" was stored as "of Ruin", and the
+    /// prefix version as "Mighty".
+    ///
+    /// Rarity and level requirement look right on such an item, which is what made it hard to
+    /// spot: they are read across all of the records at once, so the affix supplies both.
+    /// </summary>
+    [Theory]
+    [InlineData(true, false, "Ancient Warmaul of the Aether")]
+    [InlineData(false, true, "Shrewd Ancient Warmaul")]
+    [InlineData(true, true, "Shrewd Ancient Warmaul of the Aether")]
+    public void UnknownRecordWithAnAffixKeepsItsStoredName(bool suffix, bool prefix, string stored) {
+        var item = AddUnparsedItem(stored, prefix ? Prefix : null, suffix ? Suffix : null);
+
+        Assert.Equal(0, ItemNameRefresh.Run(_connection));
+        Assert.Equal(stored, NameOf(item));
+
+        NewItemDetails.Apply(_connection, [item]);
+        Assert.Equal(stored, NameOf(item));
+        Assert.Equal(stored.ToLowerInvariant(), LowercaseOf(item));
+    }
+
+    /// <summary>
+    /// A cropped name that was written elsewhere — by this port before the guard, by the Windows
+    /// tool, by another client — and arrived through a merge or the online backup. Nothing asks
+    /// to describe such an item again, and composing agrees with the crop, so without this it
+    /// would keep the affix for ever.
+    /// </summary>
+    [Fact]
+    public void AnAffixOnlyNameThatArrivedFromElsewhereIsRepairedFromTheTooltip() {
+        var item = AddUnparsedItem("of the Aether", null, Suffix);
+        AddTooltip(item, "^BAncient Warmaul of the Aether");
+
+        Assert.Equal(1, ItemNameRefresh.Run(_connection));
+        Assert.Equal("Ancient Warmaul of the Aether", NameOf(item));
+        Assert.Equal("ancient warmaul of the aether", LowercaseOf(item));
+
+        // And having repaired it, it stays repaired.
+        Assert.Equal(0, ItemNameRefresh.Run(_connection));
+    }
+
+    /// <summary>
+    /// The same crop with no tooltip to fall back on keeps what it has. Blanking it would drop
+    /// it out of the name search, and parsing the mod its base record comes from repairs it
+    /// properly — through the ordinary path, on the composed name's own merits.
+    /// </summary>
+    [Fact]
+    public void AnAffixOnlyNameWithNoTooltipIsLeftAlone() {
+        var item = AddUnparsedItem("of the Aether", null, Suffix);
+
+        Assert.Equal(0, ItemNameRefresh.Run(_connection));
+        Assert.Equal("of the Aether", NameOf(item));
+    }
+
+    /// <summary>
+    /// An item the game itself draws under an affix-only name — so the tooltip agrees with the
+    /// stored name and there is nothing to repair. Rewriting the row to the value it already
+    /// holds would make every sweep report work and never settle.
+    /// </summary>
+    [Fact]
+    public void ATooltipThatAgreesWithTheCropIsNotARepair() {
+        var item = AddUnparsedItem("of the Aether", null, Suffix);
+        AddTooltip(item, "^Bof the Aether");
+
+        Assert.Equal(0, ItemNameRefresh.Run(_connection));
+        Assert.Equal("of the Aether", NameOf(item));
+    }
+
+    /// <summary>
+    /// A real name that happens to sit on an item with an unparsed base record is not a crop and
+    /// is not touched — the repair keys on the name being *exactly* what the affixes compose to.
+    /// </summary>
+    [Fact]
+    public void ATooltipNamedItemIsNotMistakenForACrop() {
+        var item = AddUnparsedItem("Ancient Warmaul of the Aether", null, Suffix);
+        AddTooltip(item, "^BAncient Warmaul of the Aether");
+
+        Assert.Equal(0, ItemNameRefresh.Run(_connection));
+        Assert.Equal("Ancient Warmaul of the Aether", NameOf(item));
+    }
+
+    /// <summary>An item on a base record the game data says nothing about.</summary>
+    private long AddUnparsedItem(string name, string? prefix, string? suffix) {
+        Execute("INSERT INTO PlayerItem (baserecord, PrefixRecord, SuffixRecord, MateriaRecord, "
+                + "Seed, Name, namelowercase) VALUES "
+                + $"('records/items/from/a/mod/nobody/parsed.dbr', '{prefix ?? ""}', '{suffix ?? ""}', "
+                + $"'', 0, '{name.Replace("'", "''")}', '{name.Replace("'", "''").ToLowerInvariant()}')");
+
+        using var command = _connection.CreateCommand();
+        command.CommandText = "SELECT last_insert_rowid();";
+        return (long)command.ExecuteScalar()!;
+    }
+
+    /// <summary>
+    /// The tooltip the game drew for an item, as the hook captures it: text class 6 is the name
+    /// line, and it still carries the game's colour codes.
+    /// </summary>
+    private void AddTooltip(long item, string nameLine) {
+        Execute($"INSERT INTO ReplicaItem2 (playeritemid) VALUES ({item})");
+
+        using var command = _connection.CreateCommand();
+        command.CommandText = "SELECT last_insert_rowid();";
+        var replica = (long)command.ExecuteScalar()!;
+
+        Execute("INSERT INTO ReplicaItemRow (replicaitemid, Type, Text, TextLowercase) VALUES "
+                + $"({replica}, 6, '{nameLine.Replace("'", "''")}', "
+                + $"'{nameLine.Replace("'", "''").ToLowerInvariant()}')");
+    }
+
+    /// <summary>
     /// With no parsed game data there is nothing to compose from, and the names an unparsed
     /// collection arrived with are all it has.
     /// </summary>

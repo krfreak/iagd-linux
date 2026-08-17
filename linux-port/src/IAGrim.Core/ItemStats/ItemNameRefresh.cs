@@ -1,4 +1,5 @@
 using IAGrim.Core.ItemStats.Dto;
+using IAGrim.Platform;
 using Microsoft.Data.Sqlite;
 
 namespace IAGrim.Core.ItemStats;
@@ -26,8 +27,10 @@ namespace IAGrim.Core.ItemStats;
 /// </summary>
 public static class ItemNameRefresh {
     /// <param name="ids">Restrict to these items, or null for the whole collection.</param>
+    /// <param name="report">Told about repairs, which are rarer and less obvious than rewrites.</param>
     /// <returns>How many names were rewritten.</returns>
-    public static int Run(SqliteConnection connection, IReadOnlyList<long>? ids = null) {
+    public static int Run(SqliteConnection connection, IReadOnlyList<long>? ids = null,
+                          Action<string>? report = null) {
         var composer = ItemNameComposer.Load(connection);
         if (composer is null) return 0;
 
@@ -35,6 +38,11 @@ public static class ItemNameRefresh {
         if (statsByRecord.Count == 0) return 0;
 
         var updates = new List<(long Id, string Name)>();
+
+        // Items whose stored name is decoration rather than a name, with that name. Collected
+        // rather than fixed in place because the tooltips they are repaired from are one query
+        // for the batch.
+        var cropped = new List<(long Id, string Name)>();
 
         using (var command = connection.CreateCommand()) {
             var scope = ids is null ? "" : $" WHERE Id IN ({string.Join(",", ids)})";
@@ -46,13 +54,35 @@ public static class ItemNameRefresh {
             while (reader.Read()) {
                 string? Text(int i) => reader.IsDBNull(i) ? null : reader.GetString(i);
 
+                var stored = Text(5);
                 var composed = composer.Compose(statsByRecord, Text(1), Text(2), Text(3), Text(4));
-                if (composed.Length == 0) continue;
-                if (string.Equals(composed, Text(5), StringComparison.Ordinal)) continue;
+
+                if (composed.Length == 0) {
+                    // Nothing to compose from, so the stored name normally stands. The exception
+                    // is a name that is not one: an item whose base record is unparsed but whose
+                    // affixes are not was named after its affixes alone by every client that
+                    // composed without requiring a core — this port before the guard in
+                    // ItemNameComposer, and the Windows tool still. Such a name arrives here
+                    // through a merge or the online backup as readily as it was written here, so
+                    // recognising it is what stops it settling in permanently: nothing else will
+                    // ever ask about this item again, and a later sweep agrees with the crop.
+                    if (!string.IsNullOrEmpty(stored)
+                        && string.Equals(
+                            stored,
+                            composer.AffixOnlyName(statsByRecord, Text(1), Text(2), Text(3), Text(4)),
+                            StringComparison.Ordinal)) {
+                        cropped.Add((reader.GetInt64(0), stored));
+                    }
+                    continue;
+                }
+
+                if (string.Equals(composed, stored, StringComparison.Ordinal)) continue;
 
                 updates.Add((reader.GetInt64(0), composed));
             }
         }
+
+        if (cropped.Count > 0) updates.AddRange(RepairFromTooltips(connection, cropped, report));
 
         if (updates.Count == 0) return 0;
 
@@ -75,6 +105,79 @@ public static class ItemNameRefresh {
         transaction.Commit();
 
         return updates.Count;
+    }
+
+    /// <summary>
+    /// Grim Dawn's GameTextClass for the line of a tooltip that holds the item's name — the same
+    /// one <c>LootStore.AttachReplica</c> reads.
+    /// </summary>
+    private const int NameTextClass = 6;
+
+    /// <summary>
+    /// The game's own name for items this cannot compose one for, out of the tooltips already
+    /// stored against them.
+    ///
+    /// This is the fallback the port already uses for an item whose records are not in the game
+    /// data — <c>AttachReplica</c> fills the name column from the same line — so a repair puts
+    /// the item exactly where it would have been had the crop never been written, rather than
+    /// inventing a name of its own. It carries the game's display markers, which is what that
+    /// path stores for such an item too.
+    ///
+    /// An item with no tooltip keeps the crop. There is nothing better to give it here, and
+    /// parsing the mod its base record comes from repairs it properly at the next sweep — the
+    /// composed name then wins on its own merits, through the ordinary path above.
+    /// </summary>
+    private static List<(long Id, string Name)> RepairFromTooltips(
+        SqliteConnection connection, List<(long Id, string Name)> cropped, Action<string>? report) {
+
+        var repaired = new List<(long Id, string Name)>();
+
+        using (var command = connection.CreateCommand()) {
+            command.CommandText = $"""
+                SELECT ri.playeritemid, r.Text
+                FROM ReplicaItem2 ri
+                JOIN ReplicaItemRow r ON r.replicaitemid = ri.Id
+                WHERE r.Type = {NameTextClass}
+                  AND ri.playeritemid IN ({string.Join(",", cropped.Select(item => item.Id))});
+                """;
+
+            var stored = cropped.ToDictionary(item => item.Id, item => item.Name);
+            var seen = new HashSet<long>();
+            try {
+                using var reader = command.ExecuteReader();
+                while (reader.Read()) {
+                    if (reader.IsDBNull(1)) continue;
+
+                    var id = reader.GetInt64(0);
+                    var name = LootedItem.StripColourCodes(reader.GetString(1));
+                    // Upstream has no ordinal column on these rows and relies on insertion
+                    // order; the first name line is the name, as AttachReplica reads it.
+                    if (name.Length == 0 || !seen.Add(id)) continue;
+
+                    // A tooltip that says the same thing is not a repair. It is possible — the
+                    // game draws an affix-only name for an item that genuinely has one — and
+                    // rewriting a row to the value it already holds would make every sweep
+                    // report work and never settle.
+                    if (stored.TryGetValue(id, out var current)
+                        && string.Equals(current, name, StringComparison.Ordinal)) {
+                        continue;
+                    }
+
+                    repaired.Add((id, name));
+                }
+            }
+            catch (SqliteException) { return repaired; }   // no tooltips stored yet
+        }
+
+        if (report is not null) {
+            report($"restored {repaired.Count:N0} item name(s) from the game's own tooltip"
+                   + (cropped.Count > repaired.Count
+                       ? $"; {cropped.Count - repaired.Count:N0} more have no tooltip to restore from "
+                         + "and keep their affix, which parsing the mod they come from will fix"
+                       : ""));
+        }
+
+        return repaired;
     }
 
     /// <summary>
