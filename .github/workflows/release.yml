@@ -116,13 +116,38 @@ jobs:
             chown -R '"$(id -u):$(id -g)"' linux-port/native/hook build
           '
 
+      # What the runner has, printed before anything large runs. A restore that fails in 34ms
+      # without logging is the shape a machine problem takes rather than a NuGet one, and disk
+      # is the candidate the log cannot rule out on its own — the step before this one unpacks a
+      # couple of gigabytes of mingw toolchain into the docker layer.
+      - name: What the runner looks like
+        run: |
+          df -h
+          echo
+          dotnet --info
+          echo
+          env | grep -i -E 'nuget|dotnet|home=' | sort
+
       # linux-port/package rather than the root `package`, whose `native` prerequisite would want
       # a mingw compiler on the runner. build-appimage.sh checks both binaries are present and
       # stops with a clear message if the step above did not produce them.
       - name: Package
         env:
           VERSION: ${{ steps.version.outputs.version }}
+          # Both read by build-appimage.sh, and both only for as long as the restore failure
+          # below is unexplained. The console tells us nothing; the binlog will.
+          IAGD_RESTORE_BINLOG_DIR: ${{ github.workspace }}/binlogs
+          IAGD_RESTORE_VERBOSITY: detailed
         run: make -C linux-port package
+
+      # The point of the exercise: this is what gets read when the restore fails again.
+      - name: Keep the restore logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: restore-binlogs
+          path: ${{ github.workspace }}/binlogs
+          if-no-files-found: warn
 
       - name: List what was built
         run: ls -lh linux-port/packaging/out

@@ -68,10 +68,24 @@ PROJECTS="src/IAGrim.App/IAGrim.App.csproj tools/iagd/iagd.csproj src/IAGrim.Hos
 # --disable-parallel for the same reason. Restoring one package at a time is slower and is what
 # a starved machine can actually complete; the silent-failure shape above is what a CI runner
 # produces when the parallel restore hits a resource limit rather than a NuGet error.
+#
+# IAGD_RESTORE_BINLOG_DIR turns on a binary log per project. It exists because the failure this
+# is chasing logs nothing the console can show: NuGet reports every project as "Failed to
+# restore (in 34 ms)" and then MSB4181, with no package, no path and no NU code, on a runner
+# where the same restore from an empty package cache succeeds on this machine. A binlog records
+# what the loggers dropped. Replay one with:
+#
+#     dotnet msbuild restore-IAGrim.App.binlog -v:diag
 say "Restoring packages"
 for project in $PROJECTS; do
+    binlog=()
+    if [ -n "${IAGD_RESTORE_BINLOG_DIR:-}" ]; then
+        mkdir -p "$IAGD_RESTORE_BINLOG_DIR"
+        binlog=("-bl:$IAGD_RESTORE_BINLOG_DIR/restore-$(basename "$project" .csproj).binlog")
+    fi
+
     dotnet restore "$LINUX_PORT/$project" -r "$RID" -p:SelfContained=true \
-        --disable-parallel --nologo
+        --disable-parallel --nologo -v "${IAGD_RESTORE_VERBOSITY:-normal}" "${binlog[@]}"
 done
 
 say "Publishing (self-contained, $RID)"
