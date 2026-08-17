@@ -119,14 +119,21 @@ public sealed class ItemNameComposer {
         var quality = Resolve(baseRecord, "itemQualityTag");
         var style = Resolve(baseRecord, "itemStyleTag");
 
+        var name = _combinator.TranslateName(prefix, quality, style, core, suffix);
+
+        // A component decorates a name; it is not one. Upstream appends it unconditionally and
+        // stores whatever comes out, but this port keeps the stored name when the game data can
+        // name nothing (see the callers' IFNULL and the empty-string check in ItemNameRefresh),
+        // and "" is the only way to say so. Appending to an empty name says the opposite: an
+        // item whose base record is unparsed still has a socketed *vanilla* component, which is
+        // parsed, so the bracket resolved when nothing else did and "Modded Blade" was rewritten
+        // to " [Antivenom Salve]" — the component's name in place of the item's.
+        if (string.IsNullOrWhiteSpace(name)) return string.Empty;
+
         // The socketed component, which upstream appends in brackets rather than ordering with
         // the rest. Its own UI splits the brackets back off to draw the component separately.
-        var materia = string.Empty;
         var entry = tagEntries.FirstOrDefault(row => row.Record == materiaRecord && row.Stat == "description");
-        if (entry is not null) {
-            materia = $" [{TagName(entry.TextValue) ?? entry.TextValue}]";
-        }
 
-        return _combinator.TranslateName(prefix, quality, style, core, suffix) + materia;
+        return entry is null ? name : $"{name} [{TagName(entry.TextValue) ?? entry.TextValue}]";
     }
 }

@@ -172,6 +172,26 @@ public class ItemNameTests : IDisposable {
     }
 
     /// <summary>
+    /// The same, but with a component in the socket — the case that broke. A component is a
+    /// vanilla record and is nearly always parsed, so an item whose *base* record is not leaves
+    /// exactly one nameable part, and the composed name was the bracketed component on its own:
+    /// "Modded Blade" became " [Bindings of Bysmiel]".
+    /// </summary>
+    [Fact]
+    public void UnknownRecordWithAComponentKeepsItsStoredNameToo() {
+        Execute("INSERT INTO PlayerItem (baserecord, PrefixRecord, SuffixRecord, MateriaRecord, "
+                + "Seed, Name, namelowercase) VALUES "
+                + $"('records/items/from/a/mod/nobody/parsed.dbr', '', '', '{Component}', 0, "
+                + "'Modded Blade', 'modded blade')");
+
+        Assert.Equal(0, ItemNameRefresh.Run(_connection));
+
+        using var command = _connection.CreateCommand();
+        command.CommandText = "SELECT Name FROM PlayerItem WHERE baserecord LIKE '%mod%';";
+        Assert.Equal("Modded Blade", command.ExecuteScalar() as string);
+    }
+
+    /// <summary>
     /// With no parsed game data there is nothing to compose from, and the names an unparsed
     /// collection arrived with are all it has.
     /// </summary>
@@ -197,5 +217,28 @@ public class ItemNameTests : IDisposable {
         Assert.Equal(1, described);
         Assert.Equal(0, skipped);
         Assert.Equal("Shrewd Lokarr's Coat", NameOf(item));
+    }
+
+    /// <summary>
+    /// The import path reaches the same case, and is the one a player actually hits: a component
+    /// is one of the records <c>Records()</c> offers, so an item whose base record is unparsed
+    /// still passes the "some record is known" gate on the component alone, and gets described.
+    /// It must be described without being renamed after the thing in its socket.
+    /// </summary>
+    [Fact]
+    public void ImportOfAnUnknownRecordWithAComponentKeepsItsStoredName() {
+        Execute("INSERT INTO PlayerItem (baserecord, PrefixRecord, SuffixRecord, MateriaRecord, "
+                + "Seed, Name, namelowercase) VALUES "
+                + $"('records/items/from/a/mod/nobody/parsed.dbr', '', '', '{Component}', 0, "
+                + "'Modded Blade', 'modded blade')");
+
+        using var command = _connection.CreateCommand();
+        command.CommandText = "SELECT last_insert_rowid();";
+        var item = (long)command.ExecuteScalar()!;
+
+        NewItemDetails.Apply(_connection, [item]);
+
+        Assert.Equal("Modded Blade", NameOf(item));
+        Assert.Equal("modded blade", LowercaseOf(item));
     }
 }
