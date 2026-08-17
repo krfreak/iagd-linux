@@ -1,6 +1,6 @@
 --- a/stdafx.h
 +++ b/stdafx.h
-@@ -9,6 +9,7 @@
+@@ -9,6 +9,10 @@
  #define WIN32_LEAN_AND_MEAN		// Exclude rarely-used stuff from Windows headers
  // Windows Header Files:
  #include <windows.h>
@@ -10,5 +10,9 @@
 -#include <codecvt> // wstring_convert
 \ No newline at end of file
 +#include <tchar.h>   // _T
++// _beginthread / _beginthreadex, used by three of the hooks. MSVC reached these through
++// its own headers and never needed the include; on MinGW only GCC 16's <filesystem> happens
++// to pull process.h in, so GCC 13 does not compile them without this.
++#include <process.h>
 +#include "utf8_compat.h"   // replaces the removed <codecvt>
 \ No newline at end of file

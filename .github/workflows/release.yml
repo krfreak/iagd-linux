@@ -40,16 +40,14 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
-      - name: Install the build toolchains
+      - name: Install the packaging tools
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 gcc-mingw-w64-i686 \
             python3-pil desktop-file-utils file zsync
-        # mingw x86-64 builds the hook DLL and injector64.exe; the i686 compiler is there because
-        # the injector's own Makefile builds both widths. python3-pil lets make-icon.sh extract
-        # upstream's icon rather than falling back to the drawn one. desktop-file-utils, file and
-        # zsync are what appimagetool shells out to.
+        # python3-pil lets make-icon.sh extract upstream's icon rather than falling back to the
+        # drawn one. desktop-file-utils, file and zsync are what appimagetool shells out to.
+        # The mingw toolchain is deliberately absent — see the native build step.
 
       - name: Install appimagetool
         run: |
@@ -86,19 +84,40 @@ jobs:
             echo "version=$(date +%Y.%m.%d)" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Unpack the patched hook and injector sources
+        run: scripts/prepare.sh
+
+      # ── Why the two Windows binaries are built in a container ───────────────────────────────
+      #
+      # Ubuntu's mingw-w64 targets msvcrt.dll. The hook that was measured loading cleanly inside
+      # the live game (PHASE0.md §9) is a UCRT build, which is what the toolchain used for
+      # development produces, and Ubuntu packages no UCRT variant to switch to. Rather than ship
+      # a hook nobody has run under Proton, the two mingw builds happen in an Arch container —
+      # the same compiler and the same CRT as the local build. Measured here: 12 api-ms-win-crt
+      # imports and no msvcrt.dll, against 0 and one respectively under Ubuntu's toolchain.
+      #
+      # Only these two steps need it. Everything else — .NET, node, appimagetool — runs on the
+      # runner as usual.
       - name: Build the hook and the injector
-        run: make native
+        run: |
+          docker run --rm -v "$PWD":/w -w /w archlinux:latest bash -euc '
+            pacman -Sy --noconfirm --needed make mingw-w64-gcc
+            make -C linux-port/native/hook
+            make -C build/proton-injector
+            # The whole reason the hook is rebuilt rather than taken from upstream'"'"'s binary.
+            # A release that reintroduced the MSVC C++ runtime imports would fail to initialise
+            # under Proton on someone else'"'"'s machine rather than here.
+            make -C linux-port/native/hook deps
+            chown -R '"$(id -u):$(id -g)"' linux-port/native/hook build
+          '
 
-      - name: Check the hook links against no MSVC C++ runtime
-        # The whole reason the hook is rebuilt rather than shipped from upstream's binary. A
-        # release that reintroduces those imports would fail to initialise under Proton, and it
-        # would fail on the user's machine rather than here.
-        run: make -C linux-port/native/hook deps
-
+      # linux-port/package rather than the root `package`, whose `native` prerequisite would want
+      # a mingw compiler on the runner. build-appimage.sh checks both binaries are present and
+      # stops with a clear message if the step above did not produce them.
       - name: Package
         env:
           VERSION: ${{ steps.version.outputs.version }}
-        run: make package
+        run: make -C linux-port package
 
       - name: List what was built
         run: ls -lh linux-port/packaging/out
