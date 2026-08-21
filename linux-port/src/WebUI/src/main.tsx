@@ -313,13 +313,17 @@ function ItemCard({ card, selected, onSelect, onTransfer, transferring }: {
       {/* One row, so the links and the level cannot land on top of each other on a card
           narrow enough that both want the same space. */}
       <footer class="item__footer">
-        <span class="item__links">
+        {/* Inert while this card's item is in flight. The host refuses the second transfer
+            anyway — that is where the guarantee lives, since two windows or a stale page can
+            both ask — but a link that stays clickable while saying "Transferring…" invites the
+            click that has to be refused. */}
+        <span class={`item__links ${transferring ? 'item__links--busy' : ''}`}>
           {copies > 1 && (
-            <a onClick={(e) => { e.stopPropagation(); onTransfer(true); }}>
+            <a onClick={(e) => { e.stopPropagation(); if (!transferring) onTransfer(true); }}>
               Transfer all ({copies})
             </a>
           )}
-          <a onClick={(e) => { e.stopPropagation(); onTransfer(false); }}>
+          <a onClick={(e) => { e.stopPropagation(); if (!transferring) onTransfer(false); }}>
             {transferring ? 'Transferring…' : copies > 1 ? 'Compare & Transfer' : 'Transfer to Stash'}
           </a>
         </span>
@@ -1943,6 +1947,22 @@ function App() {
           break;
         }
 
+        /*
+         * Taking a while, which is ordinary: the hook only collects while the transfer stash is
+         * open, and the player may not have opened it yet. The file is still queued and the host
+         * is still watching it, so the transfer stays pending — the panel goes on offering
+         * Cancel rather than offering to send an item that is already sitting in the queue.
+         */
+        case 'transferDelayed': {
+          const { transferId, itemId, message } = event.data;
+          setTransfers((current) => ({
+            ...current,
+            [itemId]: { transferId, message, pending: true },
+          }));
+          setToast(message);
+          break;
+        }
+
         case 'mergeProgress':
           setMergeProgress(event.data);
           break;
@@ -1991,17 +2011,44 @@ function App() {
     return () => clearTimeout(handle);
   }, [toast]);
 
-  const transferItems = async (ids: number[]) => {
-    for (const id of ids) {
+  /**
+   * Sends items to the game, one request each.
+   *
+   * Items already in flight are dropped before anything is sent. An item stays in the list
+   * until the game has actually taken it — that wait is what makes the transfer safe — so a
+   * second click, a "Transfer all" over a card that still holds a copy being transferred, or a
+   * duplicate promoted into a card by `itemRemoved` can all name an item that is already on its
+   * way. The host refuses those, but not asking is better than being refused.
+   */
+  const transferItems = async (ids: number[], inFlight: Record<number, TransferState>,
+                               target?: TransferTarget) => {
+    const sending = ids.filter((id) => !inFlight[id]?.pending);
+    if (sending.length === 0) {
+      setToast(ids.length === 1
+        ? 'Already on its way — open the transfer stash in game.'
+        : 'Those are already on their way — open the transfer stash in game.');
+      return;
+    }
+
+    for (const id of sending) {
       setTransfers((c) => ({ ...c, [id]: { transferId: null, message: 'Queueing…', pending: true } }));
-      const result = await api.transfer(id);
+      const result = await api.transfer(id, target);
       setTransfers((c) => ({
         ...c,
         [id]: 'transferId' in result
-          ? { transferId: result.transferId, message: 'Queued — open the transfer stash in game.', pending: true }
+          // A refused duplicate comes back with the transfer that is already running, so this
+          // follows that one rather than inventing a second handle for the same file.
+          ? {
+              transferId: result.transferId,
+              message: result.alreadyQueued
+                ? result.message
+                : 'Queued — open the transfer stash in game.',
+              pending: true,
+            }
           : { transferId: null, message: result.message, pending: false },
       }));
       if (!('transferId' in result)) { setToast(result.message); break; }
+      if (result.alreadyQueued) setToast(result.message);
     }
   };
 
@@ -2015,9 +2062,9 @@ function App() {
    * label changes to "Compare & Transfer" once there is more than one.
    */
   const transferFromCard = (card: ItemCardData, all: boolean) => {
-    if (all) transferItems(card.duplicates);
+    if (all) transferItems(card.duplicates, transfers);
     else if (card.copies > 1) setComparing(card);
-    else transferItems([card.item.id]);
+    else transferItems([card.item.id], transfers);
   };
 
   return (
@@ -2156,7 +2203,7 @@ function App() {
                 card={comparing}
                 transfers={transfers}
                 onClose={() => setComparing(null)}
-                onTransfer={(id) => { setComparing(null); transferItems([id]); }}
+                onTransfer={(id) => { setComparing(null); transferItems([id], transfers); }}
               />
             )}
 
@@ -2167,27 +2214,9 @@ function App() {
                 mods={mods}
                 allowRetarget={allowRetarget}
                 transfer={transfers[selected]}
-                onSend={async (id, target) => {
-                  setTransfers((c) => ({
-                    ...c, [id]: { transferId: null, message: 'Queueing…', pending: true },
-                  }));
-                  const result = await api.transfer(id, target);
-                  if ('transferId' in result) {
-                    setTransfers((c) => ({
-                      ...c,
-                      [id]: {
-                        transferId: result.transferId,
-                        message: 'Queued — open the transfer stash in game.',
-                        pending: true,
-                      },
-                    }));
-                  } else {
-                    // Refused outright (game not running, no hook): nothing was queued.
-                    setTransfers((c) => ({
-                      ...c, [id]: { transferId: null, message: result.message, pending: false },
-                    }));
-                  }
-                }}
+                // The same path the cards use, rather than a second copy of it: the panel had
+                // its own queueing logic and so would have needed its own answer to a refusal.
+                onSend={(id, target) => transferItems([id], transfers, target)}
                 onCancel={async (transferId) => {
                   const result = await api.cancelTransfer(transferId);
                   setTransfers((c) => ({

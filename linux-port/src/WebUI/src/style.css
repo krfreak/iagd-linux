@@ -986,6 +986,11 @@ body {
 .item__links a { color: #eeeeeec4; font-size: 12px; cursor: pointer; }
 .item__links a:hover { text-decoration: underline; }
 
+/* While the item is in flight. The links stay readable — the row says "Transferring…" and
+   that is the useful part — but stop looking like something to click. */
+.item__links--busy a { cursor: default; opacity: 0.6; }
+.item__links--busy a:hover { text-decoration: none; }
+
 /* --- the comparison modal -------------------------------------------------- */
 /* Upstream's ItemComparer.module.css: a wide panel over the list, its own scroll, and a header
    with a close button in the corner. The cards inside are the same cards as the list's — the

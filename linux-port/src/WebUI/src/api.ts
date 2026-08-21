@@ -119,6 +119,13 @@ export interface TransferQueued {
   itemId: number;
   queuedPath: string;
   message: string;
+  /**
+   * The host refused a second transfer of an item it is already holding a file for, and handed
+   * back the one in flight (409). The transferId is the existing one, so following it is right;
+   * what must not happen is treating this as a new transfer, because the item only ever had one
+   * file and only one item is coming out of it.
+   */
+  alreadyQueued?: boolean;
 }
 
 /** Returned when the host refuses to queue at all (game not running, no hook). */
@@ -611,6 +618,8 @@ export const api = {
    * `transferCompleted` event.
    *
    * Resolves to TransferQueued on success (202), or TransferRefused when the host declines.
+   * A 409 also resolves to TransferQueued, with `alreadyQueued` set: the item was already on
+   * its way, and what comes back is that transfer rather than a new one.
    */
   transfer: async (id: number, target?: TransferTarget, timeoutSeconds = 300)
       : Promise<TransferQueued | TransferRefused> => {
@@ -704,6 +713,14 @@ export type HostEvent =
   | {
       type: 'transferCompleted';
       data: { transferId: string; itemId: number; collected: boolean; message: string };
+    }
+  /**
+   * Still waiting on the game past the timeout. Not an ending: the file is still queued and the
+   * host is still watching it, so the transfer stays pending and stays cancellable.
+   */
+  | {
+      type: 'transferDelayed';
+      data: { transferId: string; itemId: number; message: string };
     };
 
 /**

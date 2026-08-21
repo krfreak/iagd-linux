@@ -1435,6 +1435,60 @@ copy. When the row that left was the card's face, the card adopts a survivor and
 tooltip: everything the merge key covers is shared across the group, but the rolled values are
 exactly what is not.
 
+### One item, one file — the cost of not deleting the row early
+
+Upstream cannot transfer the same item twice. `core.TransferItem` is a synchronous call from its
+embedded browser into C#, and `ItemTransferController.TransferItems` deposits the CSV and runs
+`_dao.Update(items, true)` in that same call. A second click re-enters `GetItemsForTransfer`,
+`GetById` finds nothing, and it says "item does not exist". There is no window because upstream
+removes the row before it returns.
+
+This port deliberately does not do that. The hook acknowledges nothing; a file *disappearing*
+from `itemqueue/outgoing` is the only evidence the item was ever created, and it only disappears
+while the player has the transfer stash open — which may be minutes away, or the next session. So
+`TransferTracker` queues, returns 202 immediately, and deletes the row later, when the file goes.
+Deleting any earlier loses the item outright if the transfer never lands.
+
+That safety costs a window upstream does not have, and for the whole of it the row is still
+there: still in the search, still on the card, still transferable. Every click during it wrote
+another CSV. The hook obeys every one, the game creates one item per file, and nothing downstream
+can tell that two of the three swords were never earned — the row is deleted once, so the
+collection looks right while the stash holds copies. Sixteen simultaneous clicks produced sixteen
+files, which is what the test asserts against.
+
+The fix is to make the window behave like upstream's absent one: an item with a file waiting for
+it is **claimed**, and a second request is refused rather than served. `TransferTracker` holds
+`itemId → transferId` beside its pending set, and the refusal hands back the transfer already in
+flight so the UI follows the one file instead of acquiring a second handle for it. `ApiRouter`
+answers 409 with that transfer and `alreadyQueued`.
+
+Two details are not incidental:
+
+- **The check and the write are one critical section.** Requests are handled on separate thread
+  pool tasks (`HostServer.RunAsync`), so a guard that reads the pending set and *then* writes the
+  file is not a guard: both clicks pass the read before either writes. Moving the write out of
+  the lock, with the check left in it, still produced five to nine files out of sixteen clicks.
+  The lock is held across the file write, which serialises transfers — that is the feature.
+- **The timeout stopped being an expiry.** It used to drop the record and stop polling while
+  deliberately leaving the file in place, on the reasoning that the hook would still collect it
+  eventually. It does — and with nothing watching, nothing deleted the row, so the collection
+  kept a copy of an item the game had just been handed. It also released the item while its file
+  was still sitting in the queue, so the next click wrote a second one. The deadline now only
+  reports (`transferDelayed`, sent once); the claim lasts exactly as long as the file does, and
+  the transfer stays cancellable.
+
+The UI stops asking rather than being refused: `transferItems` filters out ids already in flight
+before sending anything, which covers the plain double-click, "Transfer all" over a card that
+still holds a copy in flight, and the copy that `itemRemoved` promotes into a card's face while
+its own transfer is running. The card's links go inert with it. None of that is the guarantee —
+two windows on the same host, or a page that reloaded mid-transfer, never consult it — which is
+why the guard is in the tracker and the UI merely agrees with it.
+
+Not covered: transfers do not survive a host restart. The files stay in `outgoing` and the hook
+still collects them, but nothing is left watching, so those rows are never deleted. That is the
+same "kept a copy" failure the timeout used to cause, and it is a separate fix — rebuilding the
+pending set from the directory at startup.
+
 ### Copy to clipboard
 
 Upstream's, from `ItemContainer`: a link above the list that puts the visible items on the

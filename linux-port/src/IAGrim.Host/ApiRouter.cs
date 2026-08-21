@@ -529,7 +529,26 @@ public sealed class ApiRouter {
         var targetMod = allowRetarget ? request.TargetMod : null;
         var targetHardcore = allowRetarget ? request.TargetHardcore : null;
 
-        var pending = _transfers.Queue(item, id, request.TimeoutSeconds, targetHardcore, targetMod);
+        var result = _transfers.Queue(item, id, request.TimeoutSeconds, targetHardcore, targetMod);
+        var pending = result.Transfer;
+
+        // Already on its way: a second click while the first transfer is still waiting for the
+        // game. Writing another file would put a second copy of the item in the stash, and the
+        // game cannot tell that one of them was never earned — so this is a refusal, and it
+        // hands back the transfer already in flight rather than a new handle for the same file.
+        // Upstream never reaches this case: it removes the row inside the same call that
+        // deposits, so its second click finds nothing to transfer.
+        if (result.WasAlreadyQueued) {
+            await Json_(context, new {
+                transferId    = pending.TransferId,
+                itemId        = pending.ItemId,
+                queuedPath    = pending.QueuedPath,
+                alreadyQueued = true,
+                message       = $"{pending.ItemName} is already on its way. "
+                              + "Open the transfer stash in game.",
+            }, 409);
+            return;
+        }
 
         await _events.BroadcastAsync(new HostEvent("transferQueued", new {
             transferId = pending.TransferId,
