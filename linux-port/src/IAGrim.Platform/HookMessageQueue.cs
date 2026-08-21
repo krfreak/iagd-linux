@@ -10,16 +10,41 @@ public enum HookMessage {
     HookedSuccessfully = 52,
 
     /// <summary>
+    /// The game called <c>GameInfo::SetHardcore</c>. One byte of payload: whether the character
+    /// now being played is hardcore.
+    /// </summary>
+    GameInfoIsHardcore = 20,
+
+    /// <summary>
+    /// The same value, reported when an item is initialised rather than when the mode is set —
+    /// <c>InventorySack_AddItem.cpp:179</c>. Upstream treats the two identically and so does
+    /// this port; it exists because the mode is often already set by the time anything hooks it.
+    /// </summary>
+    GameInfoIsHardcoreViaInit = 47,
+
+    /// <summary>
     /// The DLL loaded, found the game unready, and unloaded itself. Written on every aborted
     /// attach, alongside the .ABORTED marker the attach script reads synchronously.
     /// </summary>
     InjectionCancelled = 8100,
 }
 
-/// <summary>One drained message: its type, and how many bytes of payload followed.</summary>
-public readonly record struct HookMessageRecord(int Type, int PayloadLength) {
+/// <summary>One drained message: its type, how many bytes of payload followed, and those bytes.</summary>
+public readonly record struct HookMessageRecord(int Type, int PayloadLength, byte[] Payload) {
     public HookMessage? Known =>
         Enum.IsDefined(typeof(HookMessage), Type) ? (HookMessage)Type : null;
+
+    /// <summary>
+    /// The payload as the one-byte boolean the two hardcore messages carry, or null for anything
+    /// else. <c>SetHardcore::HookedMethod</c> sends <c>sizeof(bool)</c>, so a record of any other
+    /// length is not one of these however its type field reads, and is refused rather than
+    /// guessed at.
+    /// </summary>
+    public bool? Hardcore =>
+        Known is HookMessage.GameInfoIsHardcore or HookMessage.GameInfoIsHardcoreViaInit
+        && Payload.Length == 1
+            ? Payload[0] != 0
+            : null;
 }
 
 /// <summary>
@@ -31,10 +56,16 @@ public readonly record struct HookMessageRecord(int Type, int PayloadLength) {
 /// every message as it arrives because on Windows they are window messages and there is nothing
 /// to consume — the file form is this port's, and so is the obligation to empty it.
 ///
-/// Reading is deliberately shallow. Only the 8-byte header is parsed, because that is all
-/// anything here acts on; the payloads carry hardcore state and mod names that this port already
-/// gets from the loot CSV, and inventing a second source for them would be a feature upstream's
-/// file bridge does not ask for. If one is ever needed, the payload length is already reported.
+/// Reading used to stop at the 8-byte header, on the grounds that the payloads carried hardcore
+/// state and mod names the loot CSV already supplies. That is true for an item that has been
+/// looted and useless before one has: the hardcore messages are how the game says which stash is
+/// being played *now*, with no loot to hang it on, and the collection view follows them. The
+/// payload is small — one byte for the messages anything acts on — so it is carried rather than
+/// re-read on demand.
+///
+/// There is no mod name here to go with it. <c>TYPE_GameInfo_SetModName</c> is declared in
+/// <c>MessageType.h</c> and **no code in either tree ever sends it**; the hook resolves the mod
+/// name internally to pick a loot folder and never puts it on the wire. See BACKLOG entry 9.
 /// </summary>
 public sealed class HookMessageQueue {
     private readonly PrefixBridge _bridge;
@@ -68,9 +99,17 @@ public sealed class HookMessageQueue {
             }
 
             if (bytes.Length >= 8) {
+                // The declared length is the hook's, and the file's is what actually arrived.
+                // They agree unless a write was cut short, and trusting the declared one would
+                // mean copying past the end of the array; taking the smaller keeps a truncated
+                // message readable as far as it got rather than throwing.
+                var declared = BitConverter.ToInt32(bytes, 4);
+                var available = Math.Clamp(declared, 0, bytes.Length - 8);
+
                 drained.Add(new HookMessageRecord(
                     BitConverter.ToInt32(bytes, 0),
-                    BitConverter.ToInt32(bytes, 4)));
+                    declared,
+                    bytes[8..(8 + available)]));
             }
 
             try { File.Delete(file); }

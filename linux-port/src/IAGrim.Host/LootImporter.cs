@@ -45,6 +45,12 @@ internal static class LootImporter {
         var messages = bridge is null ? null : new HookMessageQueue(bridge);
         var firstDrain = true;
 
+        // The last hardcore state the game reported, so the UI is told when it *changes* rather
+        // than on every pass that happens to drain a message. The hook re-sends the same value
+        // freely — message 47 rides along with item initialisation — and a filter that reset
+        // itself every two seconds would fight anyone trying to look at their other stash.
+        bool? lastHardcore = null;
+
         // The last state the UI was told about. Everything the header shows — the game starting,
         // the hook attaching, the collection growing — changes while nobody is making requests,
         // and a page that asked once at load would go on saying "Grim Dawn is not running" for
@@ -70,16 +76,38 @@ internal static class LootImporter {
 
                 // Before anything else, so a backlog cannot grow while a slow pass runs.
                 //
-                // Drained silently. Nothing here acts on them: the attach path reads the hook's
+                // Almost all of these are drained silently: the attach path reads the hook's
                 // verdict from the .ABORTED marker synchronously, and reports an attach itself.
                 // Announcing them would mean announcing the past — the first pass on an existing
                 // install clears everything the hook ever wrote, which on this machine was 522
                 // files, 60 of them "hooked successfully" from sessions weeks ago.
+                //
+                // The hardcore messages are the exception, and *that* is why the first sweep is
+                // excluded rather than merely quiet: acting on it would switch the collection
+                // view to whatever stash was being played the last time the game ran, which can
+                // be weeks ago and is never what the person sitting here now is looking at.
                 if (messages is not null) {
-                    var drained = messages.Drain().Count;
-                    if (firstDrain && drained > 0) {
-                        Console.WriteLine($"cleared {drained} message(s) left in the bridge by earlier sessions");
+                    var drained = messages.Drain();
+
+                    if (firstDrain) {
+                        if (drained.Count > 0) {
+                            Console.WriteLine(
+                                $"cleared {drained.Count} message(s) left in the bridge by earlier sessions");
+                        }
                     }
+                    else {
+                        // Last one wins: a pass can drain several, and the most recent is the
+                        // state the game is in now. Drain returns them oldest first.
+                        var reported = drained.Select(m => m.Hardcore)
+                                              .LastOrDefault(state => state is not null);
+
+                        if (reported is bool hardcore && hardcore != lastHardcore) {
+                            lastHardcore = hardcore;
+                            await events.BroadcastAsync(HostEvent.PlayingHardcore(hardcore),
+                                                        cancellationToken);
+                        }
+                    }
+
                     firstDrain = false;
                 }
 

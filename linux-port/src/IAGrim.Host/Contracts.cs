@@ -232,4 +232,15 @@ public sealed record HostEvent(string Type, object? Data = null) {
         new("mergeProgress", new { done, total, imported, stage, message });
     public static HostEvent Message(string text, string level = "info") =>
         new("message", new { text, level });
+
+    /// <summary>
+    /// The running game reported which stash is being played. Upstream switches the visible
+    /// filter to match (<c>ModSelectionHandler.UpdateModSelection</c>), and this is how that news
+    /// reaches a UI at the end of a socket.
+    ///
+    /// Only the hardcore axis, because only the hardcore axis is ever sent — see BACKLOG entry 9
+    /// and <see cref="IAGrim.Platform.HookMessage"/>.
+    /// </summary>
+    public static HostEvent PlayingHardcore(bool hardcore) =>
+        new("playingHardcore", new { hardcore });
 }

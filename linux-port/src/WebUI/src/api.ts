@@ -709,6 +709,7 @@ export type HostEvent =
   | { type: 'status'; data: HostStatus }
   | { type: 'message'; data: { text: string; level: string } }
   | { type: 'mergeProgress'; data: MergeProgressEvent }
+  | { type: 'playingHardcore'; data: { hardcore: boolean } }
   | { type: 'transferQueued'; data: { transferId: string; itemId: number } }
   | {
       type: 'transferCompleted';

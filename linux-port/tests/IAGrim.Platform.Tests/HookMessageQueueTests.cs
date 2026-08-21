@@ -99,6 +99,69 @@ public class HookMessageQueueTests : IDisposable {
         Assert.True(File.Exists(Path.Combine(_bridge.LinuxHack, "1234.ABORTED")));
     }
 
+    /// <summary>
+    /// The hardcore messages are the only ones anything acts on, and the payload is the whole of
+    /// what they say. Both types carry it: 20 when the game sets the mode, 47 when an item is
+    /// initialised in it.
+    /// </summary>
+    [Theory]
+    [InlineData(HookMessage.GameInfoIsHardcore, 1, true)]
+    [InlineData(HookMessage.GameInfoIsHardcore, 0, false)]
+    [InlineData(HookMessage.GameInfoIsHardcoreViaInit, 1, true)]
+    [InlineData(HookMessage.GameInfoIsHardcoreViaInit, 0, false)]
+    public void ReadsTheHardcoreFlagOutOfThePayload(HookMessage type, byte value, bool expected) {
+        Write("hc", (int)type, [value]);
+
+        var drained = new HookMessageQueue(_bridge).Drain();
+
+        Assert.Single(drained);
+        Assert.Equal(expected, drained[0].Hardcore);
+    }
+
+    /// <summary>
+    /// Every other message is silent on the subject rather than reporting softcore. The two are
+    /// very different to a caller deciding whether to move somebody's collection view.
+    /// </summary>
+    [Fact]
+    public void OnlyTheHardcoreMessagesReportAHardcoreState() {
+        Write("launched", (int)HookMessage.WorkerThreadLaunched);
+        Write("hooked", (int)HookMessage.HookedSuccessfully, BitConverter.GetBytes(7));
+
+        Assert.All(new HookMessageQueue(_bridge).Drain(), m => Assert.Null(m.Hardcore));
+    }
+
+    /// <summary>
+    /// <c>SetHardcore::HookedMethod</c> sends exactly one byte. Anything else claiming to be one
+    /// of these messages is not one, whatever its type field says, and guessing at the first byte
+    /// of a differently-shaped payload would silently move the collection view.
+    /// </summary>
+    [Fact]
+    public void RefusesAHardcoreMessageOfTheWrongShape() {
+        Write("wide", (int)HookMessage.GameInfoIsHardcore, BitConverter.GetBytes(1));
+        Write("empty", (int)HookMessage.GameInfoIsHardcoreViaInit);
+
+        Assert.All(new HookMessageQueue(_bridge).Drain(), m => Assert.Null(m.Hardcore));
+    }
+
+    /// <summary>
+    /// A length header larger than the file. Reading the declared length would run off the end of
+    /// the array; what arrived is what can be trusted.
+    /// </summary>
+    [Fact]
+    public void DoesNotReadPastTheEndOfAShortenedPayload() {
+        var bytes = new byte[9];
+        BitConverter.GetBytes((int)HookMessage.GameInfoIsHardcore).CopyTo(bytes, 0);
+        BitConverter.GetBytes(64).CopyTo(bytes, 4);   // claims 64 bytes, carries one
+        bytes[8] = 1;
+        File.WriteAllBytes(Path.Combine(_bridge.LinuxHack, "lying.msg"), bytes);
+
+        var drained = new HookMessageQueue(_bridge).Drain();
+
+        Assert.Single(drained);
+        Assert.Single(drained[0].Payload);
+        Assert.Equal(64, drained[0].PayloadLength);
+    }
+
     [Fact]
     public void AnEmptyOrMissingDirectoryIsNotAnError() {
         Assert.Empty(new HookMessageQueue(_bridge).Drain());

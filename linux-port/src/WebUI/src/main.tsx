@@ -1794,6 +1794,10 @@ function App() {
   // changes the list is a functional update; this is only read to decide what a change means.
   const itemsRef = useRef(items);
   itemsRef.current = items;
+  // Same reason: the game can report which stash is being played at any moment, and deciding
+  // whether that branch is worth switching to means knowing which branches hold anything.
+  const modsRef = useRef(mods);
+  modsRef.current = mods;
   // Whether anything beyond the search box is narrowing the list — used to decide if a newly
   // looted item can be folded into the grid without contradicting the filters.
   const filteredRef = useRef(false);
@@ -1893,6 +1897,22 @@ function App() {
             // and the load effect debounces, so a stash emptied in one go costs one query.
             setDataVersion((v) => v + 1);
           }
+          break;
+        }
+
+        case 'playingHardcore': {
+          // Upstream's ModSelectionHandler.UpdateModSelection(bool): keep the mod that is
+          // selected, change only the hardcore side, and — the part worth copying exactly —
+          // apply it *only if that combination has items* (`if (query.Any())`). Switching to an
+          // empty branch would answer "you started a hardcore character" with a blank grid.
+          setFilters((current) => {
+            if (current.hardcore === event.data.hardcore) return current;
+
+            const exists = modsRef.current.some(
+              (m) => m.name === (current.mod ?? '') && m.hardcore === event.data.hardcore);
+
+            return exists ? { ...current, hardcore: event.data.hardcore } : current;
+          });
           break;
         }
 
