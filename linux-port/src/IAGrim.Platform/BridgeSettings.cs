@@ -93,6 +93,15 @@ public static class BridgeSettings {
         if (!changed) return new Result(false, false, path, null);
 
         try {
+            // The bridge directory is the hook DLL's to create, and on a prefix where the hook
+            // has never run it does not exist yet — nor after someone deletes the EvilSoft
+            // folder to start clean, which is the first thing anyone tries. Every other path on
+            // PrefixBridge creates itself on the way out; this one did not, so the write failed
+            // with "Could not find a part of the path ...\settings.json.tmp" and the hook was
+            // left unconfigured. It repaired itself only by accident, once some other call in
+            // the same session created the directory underneath it.
+            Directory.CreateDirectory(bridge.Root);
+
             // Temp-and-rename: the game may be running with the hook attached, and a truncated
             // read of this file is a hook that silently stops using file IPC.
             var temporary = path + ".tmp";

@@ -87,4 +87,33 @@ public class BridgeSettingsTests : IDisposable {
 
         Assert.False(second.Changed);
     }
+
+    /// <summary>
+    /// The bridge directory belongs to the hook DLL, which creates it the first time it runs.
+    /// Until then — a prefix the hook has never been injected into, or one where someone has
+    /// deleted the EvilSoft folder to start clean — it is simply not there, and the write has to
+    /// make it rather than fail.
+    ///
+    /// The failure this covers reached a user as "could not configure the hook: Could not find a
+    /// part of the path .../settings.json.tmp", on a prefix where the file it named did not exist
+    /// and could not be created. Worse, it repaired itself at random: the other paths on
+    /// PrefixBridge create their directories on the way out, so once some unrelated call in the
+    /// same session had made the parent, the next attempt worked — "after restarting a few times
+    /// it eventually wrote it".
+    ///
+    /// Every test above starts from a directory that already exists, which is exactly why none
+    /// of them caught this.
+    /// </summary>
+    [Fact]
+    public void APrefixTheHookHasNeverRunInGetsItsDirectoryMade() {
+        var untouched = new PrefixBridge(Path.Combine(_root, "AppData", "Local", "EvilSoft", "IAGD"));
+        Assert.False(Directory.Exists(untouched.Root));
+
+        var result = BridgeSettings.Apply(untouched, new AppSettings(), isGrimDawnParsed: true);
+
+        Assert.Null(result.Error);
+        Assert.True(result.Created);
+        Assert.True(File.Exists(untouched.SettingsFile));
+        Assert.True(BridgeSettings.Read(untouched)!.Value.WineMode);
+    }
 }
