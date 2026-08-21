@@ -155,27 +155,50 @@ inherits that. The guard is only about a tab named explicitly on both sides.
 **Cost.** Two lines and a warning string. This is bug-for-bug parity rather than a feature, and
 cheap enough that it should not wait for the entries above it.
 
-## 7. Minimize to tray, and start minimized
+## 7. Start minimized (and why minimize-to-tray is blocked)
 
-**Upstream:** `MinimizeToTrayHandler.cs:27`, `:36` — `StartMinimized` decides whether the window
-is shown at all on launch, `MinimizeToTray` whether minimizing hides it to the notifier instead
-of the taskbar. Two checkboxes on the Settings tab.
+**Upstream:** `MinimizeToTrayHandler.cs:27` — `StartMinimized` sets `WindowState = Minimized` on
+launch. `:53` — with `MinimizeToTray` on, minimizing calls `_form.Hide()` and *then* shows the
+notify icon; restoring sets `Visible = true` and puts the previous window state back. Upstream's
+tray icon is hidden by default and exists only while the window does not.
 
-**This entry contradicts one in section 10, and that is the point.** `MinimizeToTray` was written
-off there as a WinForms concern, and then `TrayIcon.cs` landed: this port now registers a
+**This entry contradicted one in section 10, and that is why it was written.** `MinimizeToTray`
+was declined there as a WinForms concern, and then `TrayIcon.cs` landed: this port registers a
 StatusNotifierItem, draws an icon, and toggles the window from it. The reasoning that declined
-the setting stopped being true when the thing it assumed was absent got built. The bullet in
-section 10 has been narrowed to `DarkMode` and `WindowSizeManager`, which are still genuinely
-WinForms-only.
+the setting stopped being true when the thing it assumed was absent got built.
 
-**Callers checked:** both live. `DarkMode` is live upstream too, but stays declined for a
-different reason — it is N/A here rather than dead, since the web UI has no light theme to switch
-away from.
+**Callers checked:** both live upstream. `DarkMode` is live there too but stays declined for a
+different reason — N/A rather than dead, since the web UI has no light theme to switch away from.
 
-**Cost.** Moderate, and the cost is Photino's rather than ours. Both settings need window-state
-control the tray icon does not currently exercise: `StartMinimized` means not showing the window
-on launch while still standing up the host and the tray, and `MinimizeToTray` means intercepting
-minimize. Worth confirming Photino can do the second before starting either.
+### Start minimized — buildable, and the part worth doing
+
+`PhotinoWindow.SetMinimized(bool)` exists and this port already calls it from the tray. Setting it
+at launch is a faithful rendering of upstream's `WindowState = Minimized`, which is all upstream
+does when `MinimizeToTray` is off. Small.
+
+### Minimize to tray — blocked on Photino, not on effort
+
+Upstream's version *hides* the window. Photino 4.0.16 cannot: neither the managed API nor the
+native library exposes any visibility control. `nm -D Photino.Native.so | grep -i "hide\|show\|visib"`
+returns `Photino_ShowMessage`, `Photino_ShowNotification` and the three file dialogs — nothing
+that hides a window. The whole of the window-state surface is `Photino_GetMinimized` /
+`Photino_SetMinimized`.
+
+So the most that could be built is "minimizing minimizes", which is what already happens without
+a setting. **A checkbox labelled "minimize to tray" that only minimizes is a control that does
+nothing**, and shipping one is worse than not having it — it moves the feature from absent to
+apparently-present-and-broken, which is the state entry 1 exists to complain about.
+
+Reaching upstream's behaviour would mean P/Invoking `gtk_widget_hide` on the window behind
+Photino's back, leaving Photino's own state tracking describing a window that is not there. Not
+worth it for a convenience toggle.
+
+Note the tray models differ anyway, and this port's is the better one for the constraint: its icon
+is always present, where upstream's appears only once the window is hidden. Restoring is therefore
+never a puzzle here, which is most of what upstream's setting buys.
+
+**Revisit when** Photino gains a visibility API — `RegisterMinimizedHandler` and
+`RegisterRestoredHandler` are already there, so only the hiding is missing.
 
 ## 8. Two toggles whose defaults this port hardcodes
 
@@ -285,8 +308,10 @@ session from a fortnight ago.
   backlog that invents features is worse than one that omits them.
 - **`DarkMode`, `WindowSizeManager`** — WinForms concerns. The web UI has no light theme to
   switch away from, and the window is Photino's. This bullet used to name `MinimizeToTray` as
-  well; it no longer does, because this port grew a tray icon after the bullet was written. See
-  entry 7.
+  well, on the same grounds, and that was wrong twice over: this port grew a tray icon after the
+  bullet was written, and the real obstacle turned out to be Photino having no way to hide a
+  window rather than anything about WinForms. It is *blocked*, not declined, so it lives in
+  entry 7 with the evidence and a condition for revisiting it.
 - **`BackupCustom` and `BackupCustomLocation`** — the "Zip backups" checkbox and its "Define"
   link on upstream's Settings tab. They are visible settings-page controls with nothing behind
   them but `FileBackup.Backup`, which is declined above: the pair only chooses a *second*
