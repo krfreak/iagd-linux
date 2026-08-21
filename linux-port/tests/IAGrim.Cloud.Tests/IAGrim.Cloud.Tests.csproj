@@ -35,6 +35,10 @@
   <ItemGroup>
     <ProjectReference Include="../../src/IAGrim.Cloud/IAGrim.Cloud.csproj" />
     <ProjectReference Include="../../src/IAGrim.Platform/IAGrim.Platform.csproj" />
+    <!-- The repair tool. Referenced here because the thing worth testing about it is not
+         that it deletes rows, but that the deletions it records actually reach the server
+         and stay gone — which needs this project's fixture. -->
+    <ProjectReference Include="../../tools/dbdoctor/DbDoctor.csproj" />
   </ItemGroup>
 
 </Project>

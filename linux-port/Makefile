@@ -3,6 +3,7 @@
 #   make          build everything (web UI, then .NET)
 #   make run      build and open the app
 #   make verify   every upstream-parity check
+#   make doctor   build the collection diagnostic (iagd-dbdoctor)
 #
 # The web UI must build before the .NET projects: vite writes into
 # src/IAGrim.Host/wwwroot, which the host project embeds as content.
@@ -11,8 +12,9 @@ WEBUI  := src/WebUI
 APP    := src/IAGrim.App/IAGrim.App.csproj
 HOST   := src/IAGrim.Host/IAGrim.Host.csproj
 CLI    := tools/iagd/iagd.csproj
+DOCTOR := tools/dbdoctor/DbDoctor.csproj
 
-.PHONY: all ui help favicon icon app cli run host test verify package clean
+.PHONY: all ui help favicon icon app cli doctor run host test verify package clean
 
 all: ui app cli
 
@@ -50,6 +52,12 @@ app: ui icon
 
 cli:
 	dotnet build $(CLI) -v q --nologo
+
+# Reads a collection and reports what is wrong with it — unreadable items, lost deletions,
+# duplicates. Not part of `all`: it is for looking at a database somebody sent in, not for
+# running the app. Opens the file read-only.
+doctor:
+	dotnet build $(DOCTOR) -v q --nologo
 
 # The desktop app: local host plus a window onto it.
 run: ui icon

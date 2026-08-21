@@ -154,6 +154,13 @@ public static class Schema {
     ];
 
     /// <summary>
+    /// The tables above, by name — for tools that have to judge a database without opening it
+    /// for writing. <see cref="Apply"/> is the only other way to learn this list and it creates
+    /// what it finds missing, which a read-only inspection must not do.
+    /// </summary>
+    public static IEnumerable<string> TableNames => Tables.Select(table => table.Table);
+
+    /// <summary>
     /// Brings a database up to date, creating what is missing and leaving what exists alone.
     /// Safe on an empty file, on a database this port wrote, and on one copied from an existing
     /// Windows install — in the last case every table already exists and this is a no-op.

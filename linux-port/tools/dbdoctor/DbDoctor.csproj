@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>iagd-dbdoctor</AssemblyName>
+    <RootNamespace>IAGrim.DbDoctor</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <!-- Platform only, and only for LinuxPaths (where the collection lives) and Schema.TableNames
+       (what a complete database contains). Nothing here opens a database for writing. -->
+  <ItemGroup>
+    <ProjectReference Include="../../src/IAGrim.Platform/IAGrim.Platform.csproj" />
+  </ItemGroup>
+
+</Project>
