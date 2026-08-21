@@ -2164,7 +2164,12 @@ function App() {
                   ? (status.parseStep ?? 'working')
                   : status?.analysing
                     ? (status.analysisStep ?? 'analysing the collection')
-                    : 'reads item names, icons and skills, then analyses the collection'}
+                    : !status?.gameDir
+                      // The button is disabled here, and a disabled button with no reason beside
+                      // it is the whole of what a tester saw: "Load Database cannot be clicked",
+                      // templates at zero, and nothing on screen connecting the two.
+                      ? 'Grim Dawn was not found — set the game folder in Settings first'
+                      : 'reads item names, icons and skills, then analyses the collection'}
               </em>
             </div>
             <dl class="tabpage__facts">

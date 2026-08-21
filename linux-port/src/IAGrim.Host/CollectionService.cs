@@ -579,6 +579,16 @@ public sealed class CollectionService {
                              bool parsing = false, string? parseStep = null) {
         using var connection = Open();
 
+        // The installation this client is actually using, which is not always the one discovery
+        // found. Someone whose game lives outside a Steam library — or whose library Steam
+        // describes in a way discovery cannot read — sets the folder by hand in Settings, and
+        // reporting only what discovery found told them "installation not found" over a path
+        // they had just typed in. The UI takes this for "there is nothing to read": it disables
+        // Load Database, so the templates stayed at zero and every explanation of why pointed at
+        // a missing game folder rather than at the button that was greyed out.
+        var current = settings ?? AppSettings.Load();
+        var gameDir = current.GameDir ?? paths.GameDir;
+
         int Count(string table) {
             using var command = connection.CreateCommand();
             command.CommandText = $"SELECT COUNT(*) FROM {table};";
@@ -586,11 +596,10 @@ public sealed class CollectionService {
             catch (SqliteException) { return 0; }   // table not created yet
         }
 
-        string? Staleness(SteamPaths p, AppSettings? s) {
-            s ??= AppSettings.Load();
+        string? Staleness() {
             try {
                 return IAGrim.Core.GameData.GameDataStatus
-                    .Check(_databasePath, s.GameDir ?? p.GameDir, s.Language).Reason;
+                    .Check(_databasePath, gameDir, current.Language).Reason;
             }
             catch (Exception) { return null; }   // never let a status call fail the UI
         }
@@ -637,11 +646,11 @@ public sealed class CollectionService {
             PendingLootFiles: bridge.PendingLootFiles().Count(),
             ItemCount:        Count("PlayerItem"),
             TemplateCount:    Count("ItemTemplate"),
-            GameDir:          paths.GameDir,
+            GameDir:          gameDir,
             BridgeDir:        bridge.Root,
             DatabaseFile:     _databasePath,
             ItemsNeedingStats: NeedingStats(),
-            GameDataStale:    Staleness(paths, settings),
+            GameDataStale:    Staleness(),
             Attaching:        attaching,
             ParsingGameData:  parsing,
             ParseStep:        parseStep,

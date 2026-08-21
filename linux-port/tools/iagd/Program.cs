@@ -60,8 +60,11 @@ internal static class Program {
     private static int Status() {
         var (paths, bridge) = Resolve();
 
+        // The configured installation, not merely the discovered one — the same distinction the
+        // staleness check below already makes. Reporting discovery alone said "not found" over a
+        // path the user had set by hand, and everything downstream reads as broken from there.
         Console.WriteLine("Environment");
-        Console.WriteLine($"  game      {paths.GameDir ?? "not found"}");
+        Console.WriteLine($"  game      {AppSettings.Load().GameDir ?? paths.GameDir ?? "not found"}");
         Console.WriteLine($"  prefix    {paths.PrefixDir}");
         Console.WriteLine($"  saves     {paths.SavePath ?? "not found"}  ({paths.SaveSource})");
         Console.WriteLine($"  bridge    {bridge.Root}");
