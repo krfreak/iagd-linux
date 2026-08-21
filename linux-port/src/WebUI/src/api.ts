@@ -393,6 +393,10 @@ export interface Settings {
   autoAttach: boolean;
   /** Leave an item's granted-skill block off its card and detail panel. */
   hideSkills: boolean;
+  /** Fade a notification on its own rather than leaving it until dismissed. */
+  autoDismissNotifications: boolean;
+  /** Wait 200ms after a keystroke before searching, rather than searching immediately. */
+  preferDelayedSearch: boolean;
   /** A chosen collection database, or null for the default location. */
   databaseFile: string | null;
   /** The database actually open, whichever way it was chosen. */

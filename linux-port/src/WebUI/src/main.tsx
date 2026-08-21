@@ -1300,6 +1300,22 @@ function SettingsView({ onSaved, progress, status }: {
           />
           <span>Hide an item's granted skill on its card and detail panel</span>
         </label>
+        <label class="settings__row settings__row--check">
+          <input
+            type="checkbox" disabled={saving}
+            checked={settings.autoDismissNotifications}
+            onChange={(e) => save({ autoDismissNotifications: (e.target as HTMLInputElement).checked })}
+          />
+          <span>Auto dismiss notifications</span>
+        </label>
+        <label class="settings__row settings__row--check">
+          <input
+            type="checkbox" disabled={saving}
+            checked={settings.preferDelayedSearch}
+            onChange={(e) => save({ preferDelayedSearch: (e.target as HTMLInputElement).checked })}
+          />
+          <span>Delay when searching</span>
+        </label>
       </div>
 
       <div class="settings__group">
@@ -1775,6 +1791,11 @@ function App() {
   const [allowRetarget, setAllowRetarget] = useState(false);
   // Whether the granted-skill block is left off a card and its detail panel.
   const [hideSkills, setHideSkills] = useState(false);
+  // Whether a notification fades on its own; see the effect below for how this combines with
+  // window focus.
+  const [autoDismissNotifications, setAutoDismissNotifications] = useState(true);
+  // Whether the search debounce below waits 200ms or fires immediately.
+  const [preferDelayedSearch, setPreferDelayedSearch] = useState(true);
   const [items, setItems] = useState<ItemCardData[]>([]);
   const [total, setTotal] = useState(0);
   // Cards are what the list pages through; items are what the window reports. Identical items
@@ -1828,13 +1849,14 @@ function App() {
 
   const search: ItemFilters = { ...filters, q: query };
 
-  // Debounced search: typing should not fire a request per keystroke.
+  // Debounced search: typing should not fire a request per keystroke. Upstream's
+  // PreferDelayedSearch decides the same 200ms-or-0 choice (UpdateListViewDelayed).
   useEffect(() => {
     if (tab !== 'items') return;
-    const handle = setTimeout(() => { load(search).catch(() => {}); }, 200);
+    const handle = setTimeout(() => { load(search).catch(() => {}); }, preferDelayedSearch ? 200 : 0);
     return () => clearTimeout(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, JSON.stringify(filters), tab, dataVersion]);
+  }, [query, JSON.stringify(filters), tab, dataVersion, preferDelayedSearch]);
 
   /*
    * Reload once the host finishes reading Grim Dawn's data or analysing the collection.
@@ -1881,6 +1903,8 @@ function App() {
     api.settings().then((s) => {
       setAllowRetarget(s.transferAnyMod);
       setHideSkills(s.hideSkills);
+      setAutoDismissNotifications(s.autoDismissNotifications);
+      setPreferDelayedSearch(s.preferDelayedSearch);
     }).catch(() => {});
 
     return subscribe((event: HostEvent) => {
@@ -2006,9 +2030,15 @@ function App() {
 
   useEffect(() => {
     if (!toast) return;
+    // Upstream fades a notification unconditionally when its window has focus — the player is
+    // already looking at it — and otherwise only when AutoDismissNotifications is on
+    // (CefBrowserHandler.ShowMessage). There is no foreground-window API to call here, so
+    // document.hasFocus() stands in for IsProgramActive.IsActive(): both answer "is this window
+    // what the player is looking at right now", just for a webview instead of a Win32 window.
+    if (!document.hasFocus() && !autoDismissNotifications) return;
     const handle = setTimeout(() => setToast(null), 4000);
     return () => clearTimeout(handle);
-  }, [toast]);
+  }, [toast, autoDismissNotifications]);
 
   const transferItems = async (ids: number[]) => {
     for (const id of ids) {

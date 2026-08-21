@@ -47,4 +47,44 @@ public class AppSettingsTests {
             Directory.Delete(Path.GetDirectoryName(path)!, recursive: true);
         }
     }
+
+    [Fact]
+    public void ANewInstallStillFadesNotificationsLikeTheHardcodedToastDid() {
+        // Matches both upstream's own fresh-install default and the 4-second fade this port had
+        // before the setting existed.
+        Assert.True(new AppSettings().AutoDismissNotifications);
+    }
+
+    [Fact]
+    public void ANewInstallKeepsTheSearchDebounceThatWasAlreadyHardcoded() {
+        // Upstream defaults this off (instant search); this port has always debounced, so
+        // copying upstream's raw default would make search instant for everyone on update.
+        Assert.True(new AppSettings().PreferDelayedSearch);
+    }
+
+    [Fact]
+    public void SavingDoesNotCarryTheNotificationOrSearchSettingsOverFromTheStoredCopy() {
+        var stored = new AppSettings { AutoDismissNotifications = false, PreferDelayedSearch = false };
+        var incoming = new AppSettings { AutoDismissNotifications = true, PreferDelayedSearch = true };
+
+        incoming.CarryOverUnmanaged(stored);
+
+        Assert.True(incoming.AutoDismissNotifications);
+        Assert.True(incoming.PreferDelayedSearch);
+    }
+
+    [Fact]
+    public void AutoDismissAndSearchDelayRoundTripThroughSaveAndLoad() {
+        var path = Path.Combine(Directory.CreateTempSubdirectory("iagd-settings-").FullName, "settings.json");
+        try {
+            new AppSettings { AutoDismissNotifications = false, PreferDelayedSearch = false }.Save(path);
+
+            var reloaded = AppSettings.Load(path);
+            Assert.False(reloaded.AutoDismissNotifications);
+            Assert.False(reloaded.PreferDelayedSearch);
+        }
+        finally {
+            Directory.Delete(Path.GetDirectoryName(path)!, recursive: true);
+        }
+    }
 }

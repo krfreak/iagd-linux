@@ -707,6 +707,8 @@ public sealed class ApiRouter {
             settings.TransferAnyMod,
             settings.AutoAttach,
             settings.HideSkills,
+            settings.AutoDismissNotifications,
+            settings.PreferDelayedSearch,
             settings.DatabaseFile,
             databaseInUse = LinuxPaths.DatabaseFile,
             availableLanguages = languages,
