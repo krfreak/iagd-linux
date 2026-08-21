@@ -228,8 +228,13 @@ public static class Schema {
     ///   * <c>created_at</c> is milliseconds there — every write goes through
     ///     <c>DateTime.ToTimestamp()</c>, which returns TotalMilliseconds. Seconds read as
     ///     January 1970 in the Windows tool and sit inside every "recent" window.
+    ///   * <c>LevelRequirement</c> is never NULL there — the property is a non-nullable double,
+    ///     so an item that has not been analysed yet is level 0. This port left it unset, and
+    ///     the search's default upper bound (<c>&lt;= 110</c>, upstream's own) drops a NULL:
+    ///     items looted before Grim Dawn's data had been read were counted in the collection
+    ///     and absent from the list, with no filter switched on to explain it.
     ///
-    /// Both conversions are decided per row and are their own no-op the second time, so this can
+    /// Each conversion is decided per row and is its own no-op the second time, so this can
     /// run on every start: a collection merged in from elsewhere is fixed the same way.
     /// </summary>
     private static void NormaliseToUpstreamValues(SqliteConnection connection) {
@@ -251,6 +256,13 @@ public static class Schema {
         TryExecute(connection,
             "UPDATE PlayerItem SET created_at = created_at * 1000 "
             + "WHERE created_at > 0 AND created_at < 100000000000;");
+
+        // Level 0 is what an undescribed item is worth to every query that reads this column,
+        // and unlike NULL it survives the level filter. The analysis pass overwrites it with the
+        // real number as soon as there is game data to compute one from; until then the item is
+        // at least visible, which is the difference this repairs.
+        TryExecute(connection,
+            "UPDATE PlayerItem SET LevelRequirement = 0 WHERE LevelRequirement IS NULL;");
     }
 
     /// <summary>

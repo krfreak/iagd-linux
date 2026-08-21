@@ -72,19 +72,33 @@ public sealed class LootStore : IDisposable {
             command.Transaction = transaction;
             // Upstream's column names. `namelowercase` is stored rather than computed because
             // upstream's wildcard search compares against it directly.
+            //
+            // LevelRequirement is written as a literal 0 rather than left NULL, which is what
+            // upstream's row holds at this point: its LevelRequirement is a non-nullable double,
+            // so an item that has not been described yet is level 0 there. The analysis pass
+            // fills in the real number moments later — but only if it can, and it cannot before
+            // Grim Dawn's data has been read.
+            //
+            // The gap between the two is not cosmetic. The search applies `LevelRequirement <=
+            // 110` at its *default* setting, matching upstream, and NULL fails that comparison:
+            // an item looted before the game data was read was written to the collection,
+            // counted in the collection, and then invisible in the list with no filter switched
+            // on — findable only by raising the maximum level past 120 to turn the clause off.
+            // Upstream never sees this because its unanalysed items compare as level 0.
             command.CommandText = """
                 INSERT INTO PlayerItem (
                     Mod, IsHardcore, baserecord, PrefixRecord, SuffixRecord, Seed, RerollsUsed,
                     ModifierRecord, MateriaRecord, RelicCompletionBonusRecord, RelicSeed,
                     EnchantmentRecord, EnchantmentSeed, TransmuteRecord,
                     AscendantAffixNameRecord, AscendantAffix2hNameRecord, AffixRerollsUsed,
-                    StackCount, Name, namelowercase, created_at, cloudid, cloud_hassync
+                    StackCount, Name, namelowercase, LevelRequirement, created_at,
+                    cloudid, cloud_hassync
                 ) VALUES (
                     $mod, $hc, $base, $prefix, $suffix, $seed, $rerolls,
                     $modifier, $materia, $relicBonus, $relicSeed,
                     $enchantment, $enchantmentSeed, $transmute,
                     $asc1, $asc2, $affixRerolls,
-                    $stack, $name, $nameLower, $created, $cloudId, 0
+                    $stack, $name, $nameLower, 0, $created, $cloudId, 0
                 );
                 SELECT last_insert_rowid();
                 """;
