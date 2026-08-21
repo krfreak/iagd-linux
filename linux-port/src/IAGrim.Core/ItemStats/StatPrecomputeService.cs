@@ -204,8 +204,15 @@ public sealed class StatPrecomputeService {
     /// <see cref="ItemNameRefresh"/> repairs stored names from data already in the collection,
     /// so forcing every installation through a fresh archive read to get the same strings would
     /// buy nothing — and would leave anyone whose game folder has moved with stale names.
+    ///
+    /// Raise it also when a *previous* version could write a wrong value, because this pass is
+    /// the only thing that overwrites one. Version 4 is that case: <see cref="NewItemDetails"/>
+    /// used to describe a freshly looted item from whichever of its records happened to be in
+    /// the stat table, so an item whose base record had never been read was stored with the
+    /// rarity and level requirement of its component — a set epic filed as a White, and nothing
+    /// to notice it afterwards, since only a missing rarity was ever revisited.
     /// </summary>
-    public const int Version = 3;
+    public const int Version = 4;
 
     /// <summary>Where that number is kept. Read by StatRefresh to decide on a rebuild.</summary>
     public const string VersionKey = "stats.version";

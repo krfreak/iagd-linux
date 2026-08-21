@@ -134,6 +134,12 @@ internal static class LootImporter {
                     // worse than one that says how many.
                     var duplicates = new List<string>();
 
+                    // Set when an item arrives whose records the analysis has never read, which
+                    // is every first sighting of a kind of item: this port stores stat rows only
+                    // for the records a collection references, so there is nothing on disk to
+                    // describe the new one with. See the pass triggered after the loop.
+                    var undescribed = 0;
+
                     foreach (var result in watcher.ImportPending()) {
                         if (result.Error is not null) {
                             Console.Error.WriteLine(
@@ -163,7 +169,9 @@ internal static class LootImporter {
                             using var connection = new Microsoft.Data.Sqlite.SqliteConnection(
                                 $"Data Source={LinuxPaths.DatabaseFile}");
                             connection.Open();
-                            IAGrim.Core.ItemStats.NewItemDetails.Apply(connection, [result.Id]);
+                            var (_, unread) = IAGrim.Core.ItemStats.NewItemDetails.Apply(
+                                connection, [result.Id]);
+                            undescribed += unread;
                         }
                         catch (Exception ex) {
                             // Cosmetic until the next pass; never worth failing an import over.
@@ -186,6 +194,23 @@ internal static class LootImporter {
                                 : $"{duplicates.Count} looted items were already in your collection "
                                   + "and were not added again.",
                             "warning"), cancellationToken);
+                    }
+
+                    // The analysis reads the game archives for the records a collection uses, so
+                    // a record it has never seen is one only a pass can describe. Doing it here
+                    // rather than leaving it for the next start is the difference between an item
+                    // that is the right colour a few seconds after it is looted and one that is
+                    // grey for the rest of the session.
+                    //
+                    // Fire and forget, and cheap when it is not needed: RunIfNeededAsync asks the
+                    // collection whether anything is actually undescribed, and the pass holds a
+                    // gate so a second batch arriving mid-pass does not start another.
+                    if (undescribed > 0) {
+                        Console.WriteLine(
+                            $"{undescribed} looted item(s) use records the analysis has not read; analysing.");
+                        _ = StatRefresh.RunIfNeededAsync(LinuxPaths.DatabaseFile,
+                                                         settings().GameDir ?? paths?.GameDir,
+                                                         events, cancellationToken);
                     }
                 }
 

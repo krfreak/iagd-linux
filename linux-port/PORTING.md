@@ -1852,6 +1852,45 @@ pet, damage-type, mastery and retaliation filters — all four of which are ques
 an item's *records* contain rather than what it rolled, and all four of which upstream answers
 with a join against this table.
 
+### The second cost of storing only the records that matter
+
+The paragraph above says the restriction has identical results for every filter. That is true of
+the collection as it stands and false of the collection a moment later, because "the records this
+collection references" is measured at the last pass — and the first time a kind of item is looted
+it references a record nobody owned when that measurement was taken.
+
+Upstream never meets this. It stores the whole game database, so `PlayerItemDaoImpl` can describe
+a newly imported item — name, rarity, level requirement — from rows that are always there. Here,
+`NewItemDetails` does the same job against a table that has rows for the item's *component* and
+its affixes and none for the item itself.
+
+It used to describe the item anyway, from whichever records it found. Rarity is
+`TranslateClassification` over an item's records, so a set epic with a Silk Swatch socketed came
+out **White** (a Silk Swatch is a common component) and one with an Ancient Armor Plate came out
+**Green** (that one is rare), each with the component's level requirement of 15 rather than its own
+58 and 65. A missing record does not cost part of the answer; it changes it. And nothing revisited
+those items afterwards: only a *null* rarity is ever looked at again, and these had a rarity — it
+was simply the wrong one. Measured on the reporter's collection, 48 items, 22 of them wearing a
+colour that was never theirs.
+
+So the import path now refuses a partial record set. An item any of whose records the analysis has
+not read is left undescribed, which is a state the rest of the client already understands: it is
+drawn in the "unknown" colour, `StatRefresh` reports it, and a pass fixes it. Two things make that
+wait short. The loot importer starts a pass as soon as a batch contains such an item, so the colour
+arrives about twelve seconds after the item does rather than at the next launch; and `StatRefresh`
+now treats "an item names a record the analysis has not read" as a reason to run one at startup.
+That condition ends itself — the pass writes a rarity for every item it looks at, including one
+whose records the game data does not have at all — which is what keeps it from becoming the
+every-launch archive scan the fifty-item threshold exists to prevent.
+
+The same fault had a second half. Upstream's `GetRecordsForItem` returns six records and
+deliberately omits `ModifierRecord`, which holds a crafting bonus; the analysis pass omitted it and
+the import path did not. A crafting bonus is classified Magical, so the two writers disagreed about
+plain crafted items — Yellow when imported, White after the next pass — and which colour you saw
+depended on which had run more recently. `scripts/verify-item-rarity.sh` now compares both record
+lists against upstream's, because the classification rules being right does not help when they are
+applied to the wrong input.
+
 ## Why not NHibernate — settled
 
 Upstream's DAO layer uses NHibernate, and it does work on Linux (verified: `BuildSessionFactory`

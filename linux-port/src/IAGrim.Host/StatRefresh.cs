@@ -121,6 +121,35 @@ public static class StatRefresh {
                 return "the game's stat rows were cleared by a re-parse";
             }
 
+            // An item whose records the analysis has never read. This port stores stat rows only
+            // for the records a collection references (see StatPrecomputeService), so the first
+            // time a kind of item is looted there is nothing on disk to describe it with — and
+            // NewItemDetails refuses to guess from the records it does have. Only a pass can
+            // close that gap, and until it does the item sits in the "unknown" colour.
+            //
+            // The condition ends itself: the pass writes a rarity for every item it looks at,
+            // even one whose records the game data does not have, so nothing here can ask for a
+            // second pass over the same item.
+            var unread = Count("""
+                WITH unread(rec) AS (
+                    SELECT d.baserecord FROM DatabaseItem_v2 d
+                     WHERE NOT EXISTS (SELECT 1 FROM DatabaseItemStat_v2 s
+                                        WHERE s.id_databaseitem = d.id_databaseitem)
+                )
+                SELECT COUNT(*) FROM PlayerItem p
+                 WHERE p.Rarity IS NULL
+                   AND (p.baserecord                 IN (SELECT rec FROM unread)
+                     OR p.PrefixRecord               IN (SELECT rec FROM unread)
+                     OR p.SuffixRecord               IN (SELECT rec FROM unread)
+                     OR p.MateriaRecord              IN (SELECT rec FROM unread)
+                     OR p.AscendantAffixNameRecord   IN (SELECT rec FROM unread)
+                     OR p.AscendantAffix2hNameRecord IN (SELECT rec FROM unread));
+                """);
+
+            if (unread > 0) {
+                return $"{unread:N0} item(s) name records the analysis has not read yet";
+            }
+
             // The rows are there but were written by an older version of the pass, which did not
             // write everything the filters now read. Nothing else notices this: the collection
             // has rarities, names and colours, and only the affected filter comes back empty.

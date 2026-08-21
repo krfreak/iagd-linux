@@ -87,8 +87,20 @@ public static class NewItemDetails {
                 record is not null && filtered.TryGetValue(record, out var rows) ? rows : [];
 
             var records = item.Records().ToList();
-            if (!records.Any(record => filtered.ContainsKey(record))) {
-                skipped++;   // an unknown record; the full pass will reach it
+
+            // Every record, not merely one of them. Rarity, affix quality, level and name are
+            // each computed *across* the record set, so a missing record does not cost part of
+            // the answer — it changes it. An item whose base record the analysis has never read
+            // still has its component and its affixes here, and classifying from those alone is
+            // how a set epic was stored as a White (its component was a Silk Swatch) or a Green
+            // (an Ancient Armor Plate is a rare component), with the level requirement of the
+            // component rather than of the item.
+            //
+            // Wrong is worse than absent: a null rarity is drawn in the "unknown" colour, is
+            // reported by StatRefresh, and gets fixed by the next pass, whereas a stored White
+            // looks like an answer and nothing ever revisits it.
+            if (!records.All(statsByRecord.ContainsKey)) {
+                skipped++;   // a record the analysis has not read; the full pass will reach it
                 continue;
             }
 
@@ -129,15 +141,23 @@ public static class NewItemDetails {
     }
 
     private sealed record Row(long Id, string BaseRecord, string? PrefixRecord, string? SuffixRecord,
-                              string? ModifierRecord, string? MateriaRecord,
+                              string? MateriaRecord,
                               string? AscendantAffixNameRecord, string? AscendantAffix2hNameRecord,
                               long Seed) {
-        /// <summary>The item's records, in upstream's order — matching StatPrecomputeService.</summary>
+        /// <summary>
+        /// The item's records, in upstream's order — <c>PlayerItemDaoImpl.GetRecordsForItem</c>,
+        /// and the same six <see cref="StatPrecomputeService"/> reads.
+        ///
+        /// <c>ModifierRecord</c> is deliberately absent, because upstream leaves it out. It holds
+        /// a crafting bonus, whose record is classified Magical, so counting it here classified a
+        /// plain white crafted item as Yellow — and, worse, disagreed with the pass, which never
+        /// looked at it. Where the two disagree the item's colour depends on which of them wrote
+        /// it last, which is not a thing a collection should be able to do.
+        /// </summary>
         public IEnumerable<string> Records() {
             if (!string.IsNullOrWhiteSpace(BaseRecord)) yield return BaseRecord;
             if (!string.IsNullOrWhiteSpace(PrefixRecord)) yield return PrefixRecord;
             if (!string.IsNullOrWhiteSpace(SuffixRecord)) yield return SuffixRecord;
-            if (!string.IsNullOrWhiteSpace(ModifierRecord)) yield return ModifierRecord;
             if (!string.IsNullOrWhiteSpace(MateriaRecord)) yield return MateriaRecord;
             if (!string.IsNullOrWhiteSpace(AscendantAffixNameRecord)) yield return AscendantAffixNameRecord;
             if (!string.IsNullOrWhiteSpace(AscendantAffix2hNameRecord)) yield return AscendantAffix2hNameRecord;
@@ -147,7 +167,7 @@ public static class NewItemDetails {
     private static List<Row> LoadItems(SqliteConnection connection, IReadOnlyList<long> ids) {
         using var command = connection.CreateCommand();
         command.CommandText = $"""
-            SELECT Id, baserecord, PrefixRecord, SuffixRecord, ModifierRecord, MateriaRecord,
+            SELECT Id, baserecord, PrefixRecord, SuffixRecord, MateriaRecord,
                    AscendantAffixNameRecord, AscendantAffix2hNameRecord, IFNULL(Seed, 0)
             FROM PlayerItem WHERE Id IN ({string.Join(",", ids)});
             """;
@@ -157,8 +177,8 @@ public static class NewItemDetails {
         while (reader.Read()) {
             string? Text(int i) => reader.IsDBNull(i) ? null : reader.GetString(i);
             items.Add(new Row(reader.GetInt64(0), reader.IsDBNull(1) ? "" : reader.GetString(1),
-                              Text(2), Text(3), Text(4), Text(5), Text(6), Text(7),
-                              reader.GetInt64(8)));
+                              Text(2), Text(3), Text(4), Text(5), Text(6),
+                              reader.GetInt64(7)));
         }
         return items;
     }

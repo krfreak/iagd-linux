@@ -59,6 +59,31 @@ for counted in re.findall(r'Count\(m => m == "(\w+)"\)', body):
 PY
 }
 
+# The records the rules are applied *to*. Upstream's GetRecordsForItem is the whole input, and
+# both of this port's writers -- the import path and the analysis pass -- have to use the same
+# one. When they did not, an item's colour depended on which of them wrote it last: ModifierRecord
+# holds a crafting bonus classified Magical, so counting it turned plain crafted items Yellow on
+# import and White again at the next pass.
+record_set() {
+    python3 - "$1" "$2" <<'PY'
+import re, sys
+src = open(sys.argv[1]).read()
+which = sys.argv[2]
+
+if which == "upstream":
+    m = re.search(r'GetRecordsForItem\(BaseItem item\)\s*\{(.*?)\n\s{8}\}', src, re.S)
+    fields = re.findall(r'records\.Add\(item\.(\w+)\)', m.group(1)) if m else []
+else:
+    m = re.search(r'IEnumerable<string> Records\(\)\s*\{(.*?)\n\s{8}\}', src, re.S)
+    fields = re.findall(r'yield return (\w+);', m.group(1)) if m else []
+
+if not fields:
+    sys.exit(f"could not read the record list from {sys.argv[1]}")
+for field in fields:
+    print(field)
+PY
+}
+
 status=0
 
 compare() {
@@ -79,6 +104,14 @@ compare "Classification to display colour" \
 compare "Level-of-green rules" \
     "$(green_filters "$DAO")" \
     "$(green_filters "$OURS")" || status=1
+
+compare "Records an item is classified from (import path)" \
+    "$(record_set "$DAO" upstream)" \
+    "$(record_set "$LINUX_PORT/src/IAGrim.Core/ItemStats/NewItemDetails.cs" ours)" || status=1
+
+compare "Records an item is classified from (analysis pass)" \
+    "$(record_set "$DAO" upstream)" \
+    "$(record_set "$LINUX_PORT/src/IAGrim.Core/ItemStats/StatPrecomputeService.cs" ours)" || status=1
 
 if [ $status -ne 0 ]; then
     echo

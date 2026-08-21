@@ -37,6 +37,8 @@ IAGrim/Database/DAO/DatabaseItemStatDaoImpl.cs	src/IAGrim.Core/ItemStats/StatFil
 IAGrim/Database/DAO/Util/ItemOperationsUtility.cs	src/IAGrim.Core/ItemStats/ItemRarity.cs	Classification-to-display-colour map and level requirement (verify-item-rarity.sh)
 IAGrim/Database/DAO/Util/ItemOperationsUtility.cs	src/IAGrim.Core/ItemStats/ItemNameComposer.cs	GetItemName: tag selection and prefix/quality/style/name/suffix ordering (one deliberate divergence -- see PORTING.md)
 IAGrim/Database/DAO/PlayerItemDaoImpl.cs	src/IAGrim.Core/ItemStats/ItemRarity.cs	"Level of green" affix counting and GetRecordsForItem (verify-item-rarity.sh)
+IAGrim/Database/DAO/PlayerItemDaoImpl.cs	src/IAGrim.Core/ItemStats/NewItemDetails.cs	GetRecordsForItem: the record set an item is classified from, on import (verify-item-rarity.sh)
+IAGrim/Database/DAO/PlayerItemDaoImpl.cs	src/IAGrim.Core/ItemStats/StatPrecomputeService.cs	GetRecordsForItem: the same record set, in the analysis pass (verify-item-rarity.sh)
 IAGrim/Parsers/Arz/ComplexItemParser.cs	src/IAGrim.Core/GameData/SkillParser.cs	Item-to-granted-skill resolution, including the buffSkillName indirection
 IAGrim/Database/DAO/ItemSkillDaoImpl.cs	src/IAGrim.Host/ItemQuery.cs	Grants-skill and summoner filter semantics
 IAGrim/Database/DAO/ItemCollectionDaoImpl.cs	src/IAGrim.Host/CollectionViewService.cs	Legendary/epic collection checklist and rarity-by-slot aggregates
