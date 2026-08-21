@@ -51,9 +51,16 @@ internal static class Program {
 
     private static (SteamPaths, PrefixBridge) Resolve() {
         var paths = SteamPaths.Discover();
-        var bridge = PrefixBridge.Discover(paths)
+
+        // The same hand-set prefix the client uses, so the two agree about which bridge they are
+        // talking through. A CLI that quietly went back to discovery here would report on, and
+        // attach to, a different prefix than the one the user configured.
+        var configured = AppSettings.Load().PrefixDir;
+        var bridge = (configured is null ? PrefixBridge.Discover(paths) : PrefixBridge.ForPrefix(configured))
             ?? throw new DirectoryNotFoundException(
-                "No Grim Dawn Proton prefix found. Launch the game through Steam once first.");
+                configured is null
+                    ? "No Grim Dawn Proton prefix found. Launch the game through Steam once first."
+                    : $"{configured} is not a Wine prefix: it contains neither drive_c nor pfx/drive_c.");
         return (paths, bridge);
     }
 
@@ -65,7 +72,7 @@ internal static class Program {
         // path the user had set by hand, and everything downstream reads as broken from there.
         Console.WriteLine("Environment");
         Console.WriteLine($"  game      {AppSettings.Load().GameDir ?? paths.GameDir ?? "not found"}");
-        Console.WriteLine($"  prefix    {paths.PrefixDir}");
+        Console.WriteLine($"  prefix    {bridge.CompatData ?? paths.PrefixDir ?? "not found"}");
         Console.WriteLine($"  saves     {paths.SavePath ?? "not found"}  ({paths.SaveSource})");
         Console.WriteLine($"  bridge    {bridge.Root}");
         Console.WriteLine($"  database  {LinuxPaths.DatabaseFile}");

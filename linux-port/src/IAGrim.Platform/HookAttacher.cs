@@ -37,10 +37,17 @@ public sealed record AttachResult(AttachOutcome Outcome, string Detail);
 public class HookAttacher {
     private readonly PrefixBridge _bridge;
     private readonly string _scriptPath;
+    private readonly Func<string?>? _gameDir;
 
-    public HookAttacher(PrefixBridge bridge, string? scriptPath = null) {
+    /// <param name="gameDir">
+    /// The installation the host is using, when it is not the one the script would find by
+    /// itself. Read per attempt rather than captured, because it is a setting and settings
+    /// change while the host runs.
+    /// </param>
+    public HookAttacher(PrefixBridge bridge, string? scriptPath = null, Func<string?>? gameDir = null) {
         _bridge = bridge;
         _scriptPath = scriptPath ?? FindScript();
+        _gameDir = gameDir;
     }
 
     /// <summary>For substituting the attach step in tests.</summary>
@@ -102,6 +109,17 @@ public class HookAttacher {
         };
         startInfo.ArgumentList.Add("bash");
         startInfo.ArgumentList.Add(_scriptPath);
+
+        // What this host resolved, so the script does not have to resolve it again — and so a
+        // path someone set by hand is honoured by the injector too. Without these the script
+        // repeats its own discovery and dies with "no Proton prefix for appid 219990" on
+        // precisely the installs where the setting exists to help.
+        if (_bridge.CompatData is { } compatData) {
+            startInfo.Environment["IAGD_COMPAT_DATA"] = compatData;
+        }
+        if (_gameDir?.Invoke() is { } gameDir) {
+            startInfo.Environment["IAGD_GAME_DIR"] = gameDir;
+        }
 
         // The script waits forever by default, retrying every 5 s until the game accepts. That
         // is right for a person watching a terminal and wrong here: this runs on a timer, so it

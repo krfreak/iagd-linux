@@ -40,6 +40,21 @@ public sealed class AppSettings : ICloudSettings {
     public string? GameDir { get; set; }
 
     /// <summary>
+    /// Grim Dawn's Proton prefix, when auto-discovery does not find it. Null means "discover it".
+    ///
+    /// This has no upstream counterpart, because upstream is a Windows program talking to a hook
+    /// in another Windows process: the two simply agree on %LOCALAPPDATA%. Here the same
+    /// directory lives inside a Wine prefix, and if this port cannot find that prefix there is no
+    /// channel to the hook at all — nothing is looted and nothing can be transferred back. It is
+    /// the Linux half of the same setting as <see cref="GameDir"/>, and needs to be settable for
+    /// the same reason: discovery only knows the layout Steam happens to use.
+    ///
+    /// Either the compatdata folder or the pfx inside it is accepted; see
+    /// <see cref="PrefixBridge.ForPrefix"/>.
+    /// </summary>
+    public string? PrefixDir { get; set; }
+
+    /// <summary>
     /// Collection database to use, instead of the one in ~/.local/share/iagd-linux.
     ///
     /// Points at an existing IAGD database — a Windows install's, one inside a Wine prefix, or a

@@ -50,10 +50,23 @@ public sealed class HostServer : IAsyncDisposable {
         // host still starts, so a UI can load and explain what is wrong.
         try {
             Paths = SteamPaths.Discover();
-            Bridge = PrefixBridge.Discover(Paths);
         }
         catch (DirectoryNotFoundException ex) {
             DiscoveryWarning = ex.Message;
+        }
+
+        // A hand-set prefix wins over discovery, and is tried even when discovery failed
+        // outright — a prefix Steam did not make is exactly the case where it would.
+        if (Settings.PrefixDir is { } configured) {
+            Bridge = PrefixBridge.ForPrefix(configured);
+            if (Bridge is null) {
+                DiscoveryWarning = $"{configured} is not a Wine prefix: it contains neither " +
+                                   "drive_c nor pfx/drive_c. Clear the setting to go back to " +
+                                   "discovery.";
+            }
+        }
+        else if (Paths is not null) {
+            Bridge = PrefixBridge.Discover(Paths);
         }
 
         // The hook only uses file-based IPC when the bridge settings say so, and without it
@@ -123,7 +136,15 @@ public sealed class HostServer : IAsyncDisposable {
                                 new CloudApi(Cloud, Settings));
 
         _listener.Start();
-        AutoAttach = Bridge is null ? null : new AutoAttachService(Bridge);
+        // The attach script does its own discovery, in bash, and fails the same way this does on
+        // a layout it does not recognise. Handing it what this host resolved keeps the two from
+        // disagreeing — and is what makes a hand-set path reach the injector at all, rather than
+        // fixing the loot channel and leaving nothing able to open it.
+        AutoAttach = Bridge is null
+            ? null
+            : new AutoAttachService(
+                Bridge,
+                new HookAttacher(Bridge, gameDir: () => Settings.GameDir ?? Paths?.GameDir));
         GameData = new GameDataRefresh(events);
 
         // A parse is the only thing that flips the hook's "Grim Dawn parsed" gate, and every way

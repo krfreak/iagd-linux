@@ -3,6 +3,11 @@
 #
 # Exports: STEAM_ROOT GAME_DIR COMPAT_DATA TARGET PROTON BRIDGE
 # Provides: die()
+#
+# IAGD_GAME_DIR and IAGD_COMPAT_DATA override the search below. The host sets both from what it
+# resolved, which is how a game folder or a Proton prefix set by hand in Settings reaches the
+# injector: without them this rediscovers from scratch and dies on exactly the layouts those
+# settings exist for, leaving a client that captures loot and can never attach to collect it.
 
 die() { echo "error: $*" >&2; exit 1; }
 
@@ -27,8 +32,15 @@ if [ -f "$LIB_VDF" ]; then
     done < "$LIB_VDF"
 fi
 
-GAME_DIR=""
-COMPAT_DATA=""
+GAME_DIR="${IAGD_GAME_DIR:-}"
+COMPAT_DATA="${IAGD_COMPAT_DATA:-}"
+
+# A prefix may be named either way round — the compatdata folder or the pfx inside it — since
+# both are called "the prefix". Everything below wants the compatdata folder.
+if [ -n "$COMPAT_DATA" ] && [ ! -d "$COMPAT_DATA/pfx" ] && [ -d "$COMPAT_DATA/drive_c" ]; then
+    COMPAT_DATA="$(dirname "$COMPAT_DATA")"
+fi
+
 for lib in "${LIBRARIES[@]}"; do
     [ -z "$GAME_DIR" ] && [ -d "$lib/steamapps/common/Grim Dawn" ] && \
         GAME_DIR="$lib/steamapps/common/Grim Dawn"

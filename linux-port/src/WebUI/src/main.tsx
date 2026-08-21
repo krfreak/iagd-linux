@@ -1273,8 +1273,26 @@ function SettingsView({ onSaved, progress }: {
           onChange={(path) => save({ gameDir: path.trim() === '' ? null : path })}
         />
 
+        <PathSetting
+          label="Proton prefix"
+          value={settings.prefixDir ?? ''}
+          placeholder={settings.resolvedPrefixDir ?? 'auto-discovered'}
+          directory
+          title="Choose the Proton prefix for Grim Dawn"
+          canBrowse={canBrowse}
+          disabled={saving}
+          onChange={(path) => save({ prefixDir: path.trim() === '' ? null : path })}
+        />
+
         <p class="settings__note settings__note--after">
-          A changed collection takes effect when the application restarts.
+          The Proton prefix is how the hook is reached — loot arrives through a folder inside it,
+          and without one nothing can be captured. Discovery looks where Steam puts it
+          (<code>steamapps/compatdata/219990</code>); name it here if the game runs from
+          somewhere else. Either that folder or the <code>pfx</code> inside it will do.
+        </p>
+
+        <p class="settings__note settings__note--after">
+          A changed collection or Proton prefix takes effect when the application restarts.
           {!canBrowse && ' Type paths here — a browser cannot open a file chooser on the host.'}
         </p>
       </div>

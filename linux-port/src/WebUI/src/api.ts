@@ -378,6 +378,8 @@ export interface Settings {
   stashToDepositTo: number;
   language: string;
   gameDir: string | null;
+  /** A Proton prefix set by hand, or null to let discovery find it. */
+  prefixDir: string | null;
   transferAnyMod: boolean;
   /** Attach the hook automatically when Grim Dawn is detected. */
   autoAttach: boolean;
@@ -389,6 +391,8 @@ export interface Settings {
   availableLanguages: string[];
   /** The directory actually in use, whether configured or discovered. */
   resolvedGameDir: string | null;
+  /** The prefix the hook is actually reached through, or null when there is none. */
+  resolvedPrefixDir: string | null;
   /**
    * What the hook will actually read, which is not necessarily what is saved: the bridge file
    * lives inside the Wine prefix and can be replaced by Steam or by the Windows tool. Null when

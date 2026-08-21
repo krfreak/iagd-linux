@@ -16,14 +16,24 @@ public sealed class SteamPaths {
     public string? SaveSource { get; init; }
 
     /// <summary>
+    /// The compatdata folder holding <see cref="PrefixDir"/>. Proton is given this one rather
+    /// than the prefix — it is what STEAM_COMPAT_DATA_PATH means, and where config_info records
+    /// which Proton build the prefix was made with — so the attach path needs it by name.
+    /// </summary>
+    public string? CompatDataDir =>
+        PrefixDir is null ? null : Path.GetDirectoryName(PrefixDir);
+
+    /// <summary>
     /// The shared IPC directory. The hook DLL builds this path itself via
     /// SHGetKnownFolderPath(RoamingAppData) + "\..\local\evilsoft\iagd\"
     /// (HookDll/Hook/HookLog.cpp:10), which under Proton lands inside the prefix.
     /// </summary>
-    public string? BridgeDir => PrefixDir is null
-        ? null
-        : Path.Combine(PrefixDir, "drive_c", "users", "steamuser",
-                       "AppData", "Local", "EvilSoft", "IAGD");
+    public string? BridgeDir => PrefixDir is null ? null : BridgeDirIn(PrefixDir);
+
+    /// <summary>Where the hook's directory sits inside any prefix, discovered or hand-set.</summary>
+    public static string BridgeDirIn(string prefixDir) =>
+        Path.Combine(prefixDir, "drive_c", "users", "steamuser",
+                     "AppData", "Local", "EvilSoft", "IAGD");
 
     private static readonly string[] SteamRootCandidates = [
         "~/.local/share/Steam",

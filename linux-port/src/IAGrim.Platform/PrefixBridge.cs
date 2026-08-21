@@ -12,13 +12,78 @@ namespace IAGrim.Platform;
 public sealed class PrefixBridge {
     public string Root { get; }
 
-    public PrefixBridge(string root) {
+    /// <summary>
+    /// The compatdata folder the prefix lives in, when it is known.
+    ///
+    /// Not used to reach any file here — every path on this class hangs off <see cref="Root"/> —
+    /// but the attach script has to be given it, since Proton is launched with
+    /// STEAM_COMPAT_DATA_PATH pointing at it. Null when a bare prefix was named and nothing
+    /// resembling a compatdata folder sits above it.
+    /// </summary>
+    public string? CompatData { get; }
+
+    public PrefixBridge(string root, string? compatData = null) {
         Root = root;
+        CompatData = compatData;
+    }
+
+    /// <summary>
+    /// The prefix this bridge sits inside: <see cref="Root"/> with the hook's own sub-path
+    /// removed. Null when the root is not shaped like one, which is the case in tests.
+    ///
+    /// For display. <see cref="CompatData"/> is the one anything functional wants.
+    /// </summary>
+    public string? Prefix {
+        get {
+            var prefix = Root;
+            foreach (var _ in SteamPaths.BridgeDirIn("").Split(Path.DirectorySeparatorChar,
+                                                               StringSplitOptions.RemoveEmptyEntries)) {
+                prefix = Path.GetDirectoryName(prefix) ?? "";
+            }
+            return prefix.Length == 0 ? null : prefix;
+        }
     }
 
     /// <summary>Locates the bridge for a discovered Grim Dawn prefix.</summary>
     public static PrefixBridge? Discover(SteamPaths paths) =>
-        paths.BridgeDir is null ? null : new PrefixBridge(paths.BridgeDir);
+        paths.BridgeDir is null ? null : new PrefixBridge(paths.BridgeDir, paths.CompatDataDir);
+
+    /// <summary>
+    /// The bridge inside a prefix named by hand, for when discovery cannot find one.
+    ///
+    /// Discovery only looks where Steam puts things: <c>steamapps/compatdata/219990/pfx</c>
+    /// under a library named in libraryfolders.vdf. A prefix made by Lutris or Heroic, one
+    /// moved off that path, or a Steam library described in a way the .vdf reader cannot follow
+    /// is invisible to it — and since the bridge is the only channel the hook has, an invisible
+    /// prefix means no looting at all, with nothing in the UI able to change that.
+    ///
+    /// Both spellings are accepted, because both are things people call "the prefix": the
+    /// compatdata folder (which contains <c>pfx</c>) and the prefix itself (which contains
+    /// <c>drive_c</c>). Rejecting one of them would be a setting that silently does nothing.
+    /// </summary>
+    /// <returns>The bridge, or null when the path is not a Wine prefix at all.</returns>
+    public static PrefixBridge? ForPrefix(string path) {
+        var trimmed = path.Trim();
+        if (trimmed.Length == 0) return null;
+
+        var full = Path.GetFullPath(trimmed);
+
+        // A compatdata folder: Proton keeps the prefix in "pfx" beside its config_info.
+        if (Directory.Exists(Path.Combine(full, "pfx", "drive_c"))) {
+            return new PrefixBridge(SteamPaths.BridgeDirIn(Path.Combine(full, "pfx")), full);
+        }
+
+        // The prefix itself. Its parent is the compatdata folder when Steam made it, and
+        // something else entirely when it did not — hence the check rather than an assumption.
+        if (Directory.Exists(Path.Combine(full, "drive_c"))) {
+            var parent = Path.GetDirectoryName(full);
+            var compatData = parent is not null
+                             && File.Exists(Path.Combine(parent, "config_info")) ? parent : null;
+            return new PrefixBridge(SteamPaths.BridgeDirIn(full), compatData);
+        }
+
+        return null;
+    }
 
     /// <summary>Hook → host: binary messages, replacing WM_COPYDATA.</summary>
     public string LinuxHack => Ensure(Path.Combine(Root, "linuxhack"));

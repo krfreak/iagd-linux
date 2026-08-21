@@ -409,6 +409,13 @@ public sealed class ApiRouter {
                 var incoming = await ReadJsonAsync<AppSettings>(context);
                 if (incoming is null) { await Json_(context, new { error = "bad request" }, 400); return; }
 
+                // Everything else here takes effect immediately; this one cannot, because the
+                // loot importer, the transfer tracker and the attach loop are all built around
+                // one bridge when the host starts. Saying so is the honest answer — silently
+                // storing it would look like a setting that does nothing.
+                var prefixChanged =
+                    !string.Equals(incoming.PrefixDir, _server.Settings.PrefixDir, StringComparison.Ordinal);
+
                 // Stash indices address tabs, so a negative one is meaningless; the hook would
                 // read it and behave unpredictably rather than reject it.
                 incoming.StashToLootFrom = Math.Max(0, incoming.StashToLootFrom);
@@ -420,7 +427,9 @@ public sealed class ApiRouter {
                     warning = error,
                     // Game data is read at parse time, so a language change needs a re-parse to
                     // take effect. Saying so beats leaving the user to wonder.
-                    message = "Saved.",
+                    message = prefixChanged
+                        ? "Saved. The Proton prefix takes effect when the application restarts."
+                        : "Saved.",
                 });
                 return;
             }
@@ -679,12 +688,17 @@ public sealed class ApiRouter {
             settings.StashToDepositTo,
             settings.Language,
             settings.GameDir,
+            settings.PrefixDir,
             settings.TransferAnyMod,
             settings.AutoAttach,
             settings.DatabaseFile,
             databaseInUse = LinuxPaths.DatabaseFile,
             availableLanguages = languages,
             resolvedGameDir = gameDir,
+            // The prefix actually in use, which is the bridge's own root walked back up to the
+            // prefix rather than anything re-derived — so what is shown is what the hook is
+            // being talked to through, not what discovery would find if asked again.
+            resolvedPrefixDir = _bridge?.CompatData ?? _bridge?.Prefix ?? _paths?.PrefixDir,
             hook = hook is null ? null : new {
                 wineModeEnabled = hook.Value.WineMode,
                 stashToLootFrom = hook.Value.LootFrom,
