@@ -78,7 +78,8 @@ export interface HostStatus {
   itemCount: number;
   templateCount: number;
   gameDir: string | null;
-  bridgeDir: string;
+  /** The hook's directory, or null when no Proton prefix could be resolved. */
+  bridgeDir: string | null;
   databaseFile: string;
   /** Items the precompute pass has not seen; rarity and level filters cannot match them. */
   itemsNeedingStats: number;
@@ -97,6 +98,13 @@ export interface HostStatus {
   analysisStep: string | null;
   /** True while the host is attaching the hook to the running game. */
   attaching: boolean;
+  /**
+   * Why this installation cannot capture loot at all — no Steam, no Proton prefix, or a
+   * configured prefix that is not one. Null when there is nothing wrong.
+   */
+  setupWarning: string | null;
+  /** Why the hook's own settings file could not be written. Null when it could. */
+  hookWarning: string | null;
 }
 
 /** Immediate response to queueing a transfer; the outcome arrives as an event. */

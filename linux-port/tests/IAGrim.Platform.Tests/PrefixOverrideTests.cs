@@ -92,4 +92,47 @@ public class PrefixOverrideTests : IDisposable {
     [Fact]
     public void AFolderWithNeitherDriveCNorPfxIsNotAPrefix() =>
         Assert.Null(PrefixBridge.ForPrefix(Make("some", "downloads")));
+
+    /// <summary>
+    /// Polling the bridge must not write to it.
+    ///
+    /// Every path on `PrefixBridge` creates its directory on the way out, which is right for the
+    /// ones about to be written into and wrong for these two: they are on the status path, and
+    /// the status path has to work on a prefix this process cannot write to. It did not — a
+    /// read-only prefix made `/api/status` throw, and the client went back to showing nothing at
+    /// all instead of the sentence explaining what was wrong.
+    /// </summary>
+    [Fact]
+    public void LookingAtTheBridgeDoesNotCreateIt() {
+        var bridge = new PrefixBridge(Path.Combine(_root, "never", "written", "IAGD"));
+
+        Assert.False(bridge.IsHookLive(DateTime.Now));
+        Assert.Empty(bridge.PendingLootFiles());
+        Assert.False(Directory.Exists(bridge.Root));
+    }
+
+    /// <summary>
+    /// And a prefix that exists but cannot be read reports "no hook, nothing pending" rather
+    /// than throwing, for the same reason: the caller is a status line, not a transfer.
+    /// </summary>
+    [Fact]
+    public void AnUnreadableBridgeReportsNothingRatherThanThrowing() {
+        var root = Make("locked", "IAGD");
+        Directory.CreateDirectory(Path.Combine(root, "linuxhack"));
+        Directory.CreateDirectory(Path.Combine(root, "itemqueue", "ingoing"));
+
+        var bridge = new PrefixBridge(root);
+        File.SetUnixFileMode(Path.Combine(root, "linuxhack"), UnixFileMode.None);
+        File.SetUnixFileMode(Path.Combine(root, "itemqueue", "ingoing"), UnixFileMode.None);
+        try {
+            Assert.False(bridge.IsHookLive(DateTime.Now));
+            Assert.Empty(bridge.PendingLootFiles());
+        }
+        finally {
+            File.SetUnixFileMode(Path.Combine(root, "linuxhack"),
+                                 UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            File.SetUnixFileMode(Path.Combine(root, "itemqueue", "ingoing"),
+                                 UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+    }
 }

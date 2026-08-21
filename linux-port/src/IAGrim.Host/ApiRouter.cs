@@ -68,12 +68,13 @@ public sealed class ApiRouter {
                 return;
 
             case ("GET", "/api/status"):
-                if (_paths is null || _bridge is null) {
-                    await Json_(context, new { error = "No Grim Dawn Proton prefix found. Launch the game through Steam once." }, 503);
-                    return;
-                }
-                await Json_(context, _collection.Status(_paths, _bridge, GameClock.StartTime(), _server?.Settings, Attaching,
-                                                    _server?.GameData?.Running ?? false, _server?.GameData?.Step));
+                // Answered unconditionally. This used to 503 when there was no prefix, on the
+                // reasoning that there was nothing to report — but a client that cannot capture
+                // loot still has a collection to show and, above all, an explanation it owes the
+                // user. The UI swallowed the failure and sat on "Connecting to iagd-host…",
+                // which is indistinguishable from a host that never came up. What was missing is
+                // now a field on the status rather than the absence of one.
+                await Json_(context, CurrentStatus());
                 return;
 
             case ("GET", "/api/items"): {
@@ -248,14 +249,8 @@ public sealed class ApiRouter {
 
                         // The collection just changed size and, if the pass ran, is no longer
                         // waiting on stats — both of which the header shows.
-                        if (_paths is not null && _bridge is not null) {
-                            await _events.BroadcastAsync(
-                                HostEvent.Status(_collection.Status(_paths, _bridge, GameClock.StartTime(),
-                                                                    _server?.Settings, Attaching,
-                                                                    _server?.GameData?.Running ?? false,
-                                                                    _server?.GameData?.Step)),
-                                cancellationToken);
-                        }
+                        await _events.BroadcastAsync(HostEvent.Status(CurrentStatus()),
+                                                     cancellationToken);
                     }
 
                     await Json_(context, new {
@@ -563,11 +558,9 @@ public sealed class ApiRouter {
         var socket = wsContext.WebSocket;
         _events.Add(socket);
 
-        if (_paths is not null && _bridge is not null) {
-            await _events.BroadcastAsync(
-                HostEvent.Status(_collection.Status(_paths, _bridge, GameClock.StartTime(), _server?.Settings, Attaching,
-                                                    _server?.GameData?.Running ?? false, _server?.GameData?.Step)), cancellationToken);
-        }
+        // The first thing a freshly connected page is told, and the one that has to work when
+        // nothing else does: a client with no prefix learns why from this frame.
+        await _events.BroadcastAsync(HostEvent.Status(CurrentStatus()), cancellationToken);
 
         // Commands travel over HTTP; this channel is push-only. Hold it open so the socket
         // stays registered for broadcasts.
@@ -671,6 +664,19 @@ public sealed class ApiRouter {
     /// <summary>True while an attach attempt is running.</summary>
     private bool Attaching =>
         _server?.AutoAttach?.State(_server.Settings.AutoAttach).Attaching ?? false;
+
+    /// <summary>
+    /// The current status, warnings included.
+    ///
+    /// One method because there are four places that report status and every one of them has to
+    /// carry the same bad news. The version of this that had each call site assemble its own
+    /// simply omitted the setup warning everywhere, which is how the most consequential state in
+    /// the port came to have no words attached to it.
+    /// </summary>
+    private HostStatus CurrentStatus() =>
+        _collection.Status(_paths, _bridge, GameClock.StartTime(), _server?.Settings, Attaching,
+                           _server?.GameData?.Running ?? false, _server?.GameData?.Step,
+                           _server?.DiscoveryWarning, _server?.HookWarning);
 
     private object SettingsPayload() {
         var settings = _server?.Settings ?? AppSettings.Load();

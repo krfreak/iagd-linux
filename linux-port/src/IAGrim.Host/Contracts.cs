@@ -86,7 +86,14 @@ public sealed record HostStatus(
     int ItemCount,
     int TemplateCount,
     string? GameDir,
-    string BridgeDir,
+    /// <summary>
+    /// The directory shared with the hook, or null when no Proton prefix could be resolved.
+    ///
+    /// Null is a working state to report, not a reason to refuse to answer: everything about the
+    /// collection still functions, and the one thing that does not — capturing loot — is exactly
+    /// what the user needs told. See <see cref="SetupWarning"/>.
+    /// </summary>
+    string? BridgeDir,
     string DatabaseFile,
     /// <summary>True while Grim Dawn's data is being read.</summary>
     bool ParsingGameData,
@@ -118,7 +125,28 @@ public sealed record HostStatus(
     /// </summary>
     string? GameDataStale,
     /// <summary>Set while an attach attempt is in progress, so the UI can say so.</summary>
-    bool Attaching);
+    bool Attaching,
+
+    /// <summary>
+    /// Why this installation cannot capture loot at all: no Steam, no Proton prefix, or a
+    /// configured prefix that is not one. Null when there is nothing wrong.
+    ///
+    /// This used to exist only as a line on stderr and as a 503 from the status endpoint, which
+    /// in a window with no terminal meant the client sat on "Connecting to iagd-host…" for ever
+    /// — the same blank screen as a host that had not started. The condition is the most
+    /// consequential one this port has and it was the only one with no words attached to it.
+    /// </summary>
+    string? SetupWarning,
+
+    /// <summary>
+    /// Why the hook's own settings file could not be written, or null when it could.
+    ///
+    /// Its own field rather than part of <see cref="SetupWarning"/> because the two need
+    /// different answers: a prefix that cannot be found is a path to set, and a settings file
+    /// that cannot be written is a permission or a prefix being rebuilt underneath us. Both end
+    /// the same way — the hook stays in shared-memory mode and captures nothing, silently.
+    /// </summary>
+    string? HookWarning);
 
 /// <param name="TargetMod">
 /// Send to a different mod's stash than the item was looted from. Honoured only when the

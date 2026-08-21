@@ -20,22 +20,29 @@ internal static class LootImporter {
         AutoAttachService? autoAttach,
         SteamPaths? paths,
         GameDataRefresh? gameData,
+        Func<(string? Setup, string? Hook)> warnings,
         CancellationToken cancellationToken) {
 
+        // No prefix: there is no loot to import, and the loop runs anyway.
+        //
+        // It used to return here, which quietly took the status heartbeat with it — this is the
+        // only thing that pushes one. A client that could not find a prefix therefore reported
+        // nothing at all: not the parse it was running, not the analysis after it, not even that
+        // it was alive. "No feedback about when parsing happens" was that, and the parsing was
+        // the least of what went unreported.
         if (bridge is null) {
             Console.WriteLine("warning: no Proton prefix; loot import disabled.");
-            return;
         }
 
         // Outside the loop on purpose: the service remembers which items it has already asked
         // the game to describe, and rebuilding it every pass would throw that away — which is
         // how the same twenty items ended up being asked for every two seconds.
-        var replicas = new ReplicaService(bridge);
+        var replicas = bridge is null ? null : new ReplicaService(bridge);
 
         // The hook's own channel. Emptied every pass because nothing else does: these files are
         // written by the DLL and never cleaned up, and an install that has been used for a few
         // days accumulates hundreds. See HookMessageQueue.
-        var messages = new HookMessageQueue(bridge);
+        var messages = bridge is null ? null : new HookMessageQueue(bridge);
         var firstDrain = true;
 
         // The last state the UI was told about. Everything the header shows — the game starting,
@@ -44,6 +51,12 @@ internal static class LootImporter {
         // the rest of the session. Upstream's window updates itself continuously for the same
         // reason; this is the equivalent for a UI at the end of a socket.
         HostStatus? lastStatus = null;
+
+        // The last failure reported, so a permanent one is said once rather than every two
+        // seconds for the rest of the session. A prefix with the wrong permissions fails
+        // identically on every pass, and 1,800 copies of one sentence an hour buries whatever
+        // else the log had to say.
+        string? lastFailure = null;
 
         while (!cancellationToken.IsCancellationRequested) {
             try {
@@ -62,11 +75,13 @@ internal static class LootImporter {
                 // Announcing them would mean announcing the past — the first pass on an existing
                 // install clears everything the hook ever wrote, which on this machine was 522
                 // files, 60 of them "hooked successfully" from sessions weeks ago.
-                var drained = messages.Drain().Count;
-                if (firstDrain && drained > 0) {
-                    Console.WriteLine($"cleared {drained} message(s) left in the bridge by earlier sessions");
+                if (messages is not null) {
+                    var drained = messages.Drain().Count;
+                    if (firstDrain && drained > 0) {
+                        Console.WriteLine($"cleared {drained} message(s) left in the bridge by earlier sessions");
+                    }
+                    firstDrain = false;
                 }
-                firstDrain = false;
 
                 // Attach the hook when the game shows up. Paced inside the service: one attempt
                 // at a time, and a growing quiet period rather than a retry every two seconds.
@@ -79,97 +94,112 @@ internal static class LootImporter {
                     }
                 }
 
-                if (paths is not null) {
-                    var status = collection.Status(paths, bridge, startedAt, settings(),
-                                                   autoAttach?.State(settings().AutoAttach).Attaching ?? false,
-                                                   gameData?.Running ?? false, gameData?.Step);
-                    // Records compare by value, so this is "has anything the user can see moved".
-                    if (status != lastStatus) {
-                        lastStatus = status;
-                        await events.BroadcastAsync(HostEvent.Status(status), cancellationToken);
+                // Unconditional, and before the import: this is the client's only heartbeat,
+                // and the states most worth reporting are the ones where the rest of this pass
+                // has nothing to do.
+                var (setupWarning, hookWarning) = warnings();
+                var status = collection.Status(paths, bridge, startedAt, settings(),
+                                               autoAttach?.State(settings().AutoAttach).Attaching ?? false,
+                                               gameData?.Running ?? false, gameData?.Step,
+                                               setupWarning, hookWarning);
+                // Records compare by value, so this is "has anything the user can see moved".
+                if (status != lastStatus) {
+                    lastStatus = status;
+                    await events.BroadcastAsync(HostEvent.Status(status), cancellationToken);
+                }
+
+                // The importing half, which needs a bridge. Guarded rather than returned
+                // from: the status above has to keep going without one, and an early exit
+                // here would skip the delay below and spin the loop.
+                if (bridge is not null && replicas is not null) {
+                    using var store = new LootStore(LinuxPaths.DatabaseFile);
+                    var watcher = new LootWatcher(bridge, store);
+
+                    // Items that arrived from a file have no tooltip; the game can render one, but
+                    // only while it is running with the hook attached. Asking otherwise just piles
+                    // request files into the prefix for a reader that is not there.
+                    var completed = replicas.CollectResults(store);
+                    if (startedAt is not null) {
+                        replicas.RequestMissing(store);
                     }
-                }
-
-                using var store = new LootStore(LinuxPaths.DatabaseFile);
-                var watcher = new LootWatcher(bridge, store);
-
-                // Items that arrived from a file have no tooltip; the game can render one, but
-                // only while it is running with the hook attached. Asking otherwise just piles
-                // request files into the prefix for a reader that is not there.
-                var completed = replicas.CollectResults(store);
-                if (startedAt is not null) {
-                    replicas.RequestMissing(store);
-                }
-                if (completed > 0) {
-                    Console.WriteLine($"filled in stats for {completed} item(s) from the game");
-                    await events.BroadcastAsync(
-                        HostEvent.Message($"Filled in stats for {completed} item(s).", "info"),
-                        cancellationToken);
-                }
-
-                // Counted rather than announced one by one: a stash tab emptied in one go can
-                // hold several copies of the same roll, and four toasts saying the same thing is
-                // worse than one that says how many.
-                var duplicates = new List<string>();
-
-                foreach (var result in watcher.ImportPending()) {
-                    if (result.Error is not null) {
-                        Console.Error.WriteLine(
-                            $"could not import {Path.GetFileName(result.File)}: {result.Error} (file kept)");
+                    if (completed > 0) {
+                        Console.WriteLine($"filled in stats for {completed} item(s) from the game");
                         await events.BroadcastAsync(
-                            HostEvent.Message($"Could not import a looted item: {result.Error}", "error"),
+                            HostEvent.Message($"Filled in stats for {completed} item(s).", "info"),
                             cancellationToken);
-                        continue;
-                    }
-                    // The collection already holds this exact roll, so the row is not written and
-                    // the item is gone from the game — the player has one fewer than they had.
-                    // Upstream drops it too (ItemClassificationService), but it says so in its log
-                    // and this said nothing at all, which is how "I moved four items in and two
-                    // arrived" looked like items being lost in transit.
-                    if (result.Duplicate) {
-                        duplicates.Add(result.Item!.PlainName ?? result.Item.BaseRecord);
-                        Console.WriteLine($"already in the collection, not added: {duplicates[^1]}");
-                        continue;
                     }
 
-                    Console.WriteLine($"looted: {result.Item!.PlainName}");
+                    // Counted rather than announced one by one: a stash tab emptied in one go can
+                    // hold several copies of the same roll, and four toasts saying the same thing is
+                    // worse than one that says how many.
+                    var duplicates = new List<string>();
 
-                    // Rarity, level and rolled values for the item that just arrived, so it is
-                    // drawn as the epic it is rather than in the "unknown" colour until the next
-                    // full pass. Upstream does the same on import.
-                    try {
-                        using var connection = new Microsoft.Data.Sqlite.SqliteConnection(
-                            $"Data Source={LinuxPaths.DatabaseFile}");
-                        connection.Open();
-                        IAGrim.Core.ItemStats.NewItemDetails.Apply(connection, [result.Id]);
-                    }
-                    catch (Exception ex) {
-                        // Cosmetic until the next pass; never worth failing an import over.
-                        Console.Error.WriteLine($"could not describe the new item: {ex.Message}");
+                    foreach (var result in watcher.ImportPending()) {
+                        if (result.Error is not null) {
+                            Console.Error.WriteLine(
+                                $"could not import {Path.GetFileName(result.File)}: {result.Error} (file kept)");
+                            await events.BroadcastAsync(
+                                HostEvent.Message($"Could not import a looted item: {result.Error}", "error"),
+                                cancellationToken);
+                            continue;
+                        }
+                        // The collection already holds this exact roll, so the row is not written and
+                        // the item is gone from the game — the player has one fewer than they had.
+                        // Upstream drops it too (ItemClassificationService), but it says so in its log
+                        // and this said nothing at all, which is how "I moved four items in and two
+                        // arrived" looked like items being lost in transit.
+                        if (result.Duplicate) {
+                            duplicates.Add(result.Item!.PlainName ?? result.Item.BaseRecord);
+                            Console.WriteLine($"already in the collection, not added: {duplicates[^1]}");
+                            continue;
+                        }
+
+                        Console.WriteLine($"looted: {result.Item!.PlainName}");
+
+                        // Rarity, level and rolled values for the item that just arrived, so it is
+                        // drawn as the epic it is rather than in the "unknown" colour until the next
+                        // full pass. Upstream does the same on import.
+                        try {
+                            using var connection = new Microsoft.Data.Sqlite.SqliteConnection(
+                                $"Data Source={LinuxPaths.DatabaseFile}");
+                            connection.Open();
+                            IAGrim.Core.ItemStats.NewItemDetails.Apply(connection, [result.Id]);
+                        }
+                        catch (Exception ex) {
+                            // Cosmetic until the next pass; never worth failing an import over.
+                            Console.Error.WriteLine($"could not describe the new item: {ex.Message}");
+                        }
+
+                        // Re-read through the collection so the UI gets the same enriched shape
+                        // the search endpoint returns, not a second thinner one. By id: the list is
+                        // ordered by name, so "the first row of an unfiltered search" is not this.
+                        var newest = collection.Card(result.Id);
+                        if (newest is not null) {
+                            await events.BroadcastAsync(HostEvent.Looted(newest), cancellationToken);
+                        }
                     }
 
-                    // Re-read through the collection so the UI gets the same enriched shape
-                    // the search endpoint returns, not a second thinner one. By id: the list is
-                    // ordered by name, so "the first row of an unfiltered search" is not this.
-                    var newest = collection.Card(result.Id);
-                    if (newest is not null) {
-                        await events.BroadcastAsync(HostEvent.Looted(newest), cancellationToken);
+                    if (duplicates.Count > 0) {
+                        await events.BroadcastAsync(HostEvent.Message(
+                            duplicates.Count == 1
+                                ? $"{duplicates[0]} was already in your collection, so it was not added again."
+                                : $"{duplicates.Count} looted items were already in your collection "
+                                  + "and were not added again.",
+                            "warning"), cancellationToken);
                     }
                 }
 
-                if (duplicates.Count > 0) {
-                    await events.BroadcastAsync(HostEvent.Message(
-                        duplicates.Count == 1
-                            ? $"{duplicates[0]} was already in your collection, so it was not added again."
-                            : $"{duplicates.Count} looted items were already in your collection "
-                              + "and were not added again.",
-                        "warning"), cancellationToken);
-                }
+                // Reached only by a pass that got all the way through, which is what makes the
+                // next failure worth printing again.
+                lastFailure = null;
             }
             catch (Exception ex) {
                 // Never let a failed pass stop the loop: the hook keeps writing files, and
                 // stopping would silently strand them.
-                Console.Error.WriteLine($"loot import pass failed: {ex.Message}");
+                if (ex.Message != lastFailure) {
+                    lastFailure = ex.Message;
+                    Console.Error.WriteLine($"loot import pass failed: {ex.Message}");
+                }
             }
 
             try { await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken); }

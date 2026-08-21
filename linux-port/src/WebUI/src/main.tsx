@@ -55,6 +55,33 @@ type View = 'items' | 'collections' | 'sets' | 'components' | 'help' | 'support'
 function StatusBar({ status }: { status: HostStatus | null }) {
   if (!status) return <div class="status status--warn">Connecting to iagd-host…</div>;
 
+  // First, because it outranks everything below it: without a prefix there is no channel to the
+  // hook, so nothing is captured and nothing can be sent back, however healthy the rest looks.
+  // This used to be a line on stderr and a 503 the page swallowed, leaving "Connecting to
+  // iagd-host…" on screen for ever — the one state in this port with no words attached to it.
+  if (status.setupWarning) {
+    return (
+      <div class="status status--warn">
+        <span class="dot dot--warn" /> Loot cannot be captured
+        <span class="status__detail">
+          {status.setupWarning} Set the Proton prefix in Settings.
+        </span>
+      </div>
+    );
+  }
+
+  // Same consequence, different cause, so it is worth its own sentence: the file is what puts
+  // the hook into Wine mode, and without it the hook falls back to shared memory and captures
+  // nothing while the game and this window both look perfectly well.
+  if (status.hookWarning) {
+    return (
+      <div class="status status--warn">
+        <span class="dot dot--warn" /> The hook could not be configured
+        <span class="status__detail">{status.hookWarning}</span>
+      </div>
+    );
+  }
+
   // A Grim Dawn patch, or a language change, invalidates every name, level and icon — and
   // nothing about that fails, so it has to be said out loud.
   // Reading Grim Dawn's data. The client starts this itself — at startup when the game has
@@ -1108,9 +1135,11 @@ function OnlineView({ onToast }: { onToast: (text: string) => void }) {
   );
 }
 
-function SettingsView({ onSaved, progress }: {
+function SettingsView({ onSaved, progress, status }: {
   onSaved: (message: string) => void;
   progress: MergeProgressEvent | null;
+  /** The live status, for the two conditions this page is where you go to fix. */
+  status: HostStatus | null;
 }) {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [saving, setSaving] = useState(false);
@@ -1141,6 +1170,22 @@ function SettingsView({ onSaved, progress }: {
 
   return (
     <section class="settings">
+      {status?.setupWarning && (
+        <div class="settings__alert">
+          <strong>No Proton prefix, so nothing can be looted.</strong> {status.setupWarning}{' '}
+          The prefix is the folder Steam keeps Grim Dawn's Windows installation in, and the hook
+          writes what it captures into a directory inside it — without one there is no channel
+          between the game and this window. Set it under Paths below.
+        </div>
+      )}
+      {status?.hookWarning && (
+        <div class="settings__alert">
+          <strong>The hook's settings file could not be written.</strong> {status.hookWarning}
+          {' '}Until it can be, the hook falls back to the shared-memory channel that does not
+          work under Proton, and captures nothing without saying so. Check that the prefix below
+          is the right one and that it is writable.
+        </div>
+      )}
       {settings.hook !== null && !settings.hook.wineModeEnabled && (
         <div class="settings__alert">
           <strong>The hook is not in Wine mode.</strong> It will not capture anything. This is
@@ -2155,7 +2200,9 @@ function App() {
           </div>
         )}
 
-        {tab === 'settings' && <SettingsView onSaved={setToast} progress={mergeProgress} />}
+        {tab === 'settings' && (
+          <SettingsView onSaved={setToast} progress={mergeProgress} status={status} />
+        )}
 
         {tab === 'online' && <OnlineView onToast={setToast} />}
 

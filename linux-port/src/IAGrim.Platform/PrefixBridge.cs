@@ -86,10 +86,20 @@ public sealed class PrefixBridge {
     }
 
     /// <summary>Hook → host: binary messages, replacing WM_COPYDATA.</summary>
-    public string LinuxHack => Ensure(Path.Combine(Root, "linuxhack"));
+    public string LinuxHack => Ensure(LinuxHackPath);
 
     /// <summary>Hook → host: items looted out of the stash.</summary>
-    public string LootIncoming => Ensure(Path.Combine(Root, "itemqueue", "ingoing"));
+    public string LootIncoming => Ensure(LootIncomingPath);
+
+    // The same two paths without the side effect, for the callers that are only *looking*.
+    //
+    // Every path here creates its directory on the way out, which is right for the ones about to
+    // be written into and wrong for the ones being polled: it makes a read fail on a prefix that
+    // cannot be written to, and the two readers below are on the status path — so a prefix with
+    // the wrong permissions took out the status endpoint itself, and the client went back to
+    // showing nothing at all rather than the message explaining why.
+    private string LinuxHackPath => Path.Combine(Root, "linuxhack");
+    private string LootIncomingPath => Path.Combine(Root, "itemqueue", "ingoing");
 
     /// <summary>
     /// Host → hook: items to materialise back into the game.
@@ -137,9 +147,15 @@ public sealed class PrefixBridge {
     /// Age relative to the running game is the only signal that can be checked from here.
     /// </summary>
     public bool IsHookLive(DateTime? gameStartedAt) {
-        var markers = Directory.Exists(LinuxHack)
-            ? Directory.GetFiles(LinuxHack, "*.PID")
-            : [];
+        string[] markers;
+        try {
+            markers = Directory.Exists(LinuxHackPath)
+                ? Directory.GetFiles(LinuxHackPath, "*.PID")
+                : [];
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) {
+            return false;   // unreadable prefix: certainly not attached, and not worth throwing over
+        }
 
         if (markers.Length == 0) return false;
         if (gameStartedAt is null) return false;   // no game running: every marker is stale
@@ -147,10 +163,16 @@ public sealed class PrefixBridge {
         return markers.Any(m => File.GetLastWriteTime(m) >= gameStartedAt.Value);
     }
 
-    public IEnumerable<string> PendingLootFiles() =>
-        Directory.Exists(LootIncoming)
-            ? Directory.EnumerateFiles(LootIncoming, "*.csv")
-            : [];
+    public IEnumerable<string> PendingLootFiles() {
+        try {
+            return Directory.Exists(LootIncomingPath)
+                ? Directory.EnumerateFiles(LootIncomingPath, "*.csv").ToList()
+                : [];
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) {
+            return [];
+        }
+    }
 
     private static string Ensure(string path) {
         Directory.CreateDirectory(path);

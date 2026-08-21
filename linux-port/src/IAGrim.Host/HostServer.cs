@@ -24,7 +24,18 @@ public sealed class HostServer : IAsyncDisposable {
     public PrefixBridge? Bridge { get; }
 
     /// <summary>Set when discovery failed, so a UI can explain itself rather than load blank.</summary>
-    public string? DiscoveryWarning { get; }
+    public string? DiscoveryWarning { get; private set; }
+
+    /// <summary>
+    /// Why the hook's settings file could not be written, or null when it could.
+    ///
+    /// Kept rather than only printed. The message that sent someone looking for a file that did
+    /// not exist — "could not configure the hook: Could not find a part of the path
+    /// …\settings.json.tmp" — went to stderr, and the application window has no terminal behind
+    /// it. The consequence is the quietest one in the port: the hook stays in shared-memory mode
+    /// and captures nothing, with the game and the client both looking perfectly healthy.
+    /// </summary>
+    public string? HookWarning { get; private set; }
 
     /// <summary>Current settings. Replaced wholesale by <see cref="UpdateSettings"/>.</summary>
     public AppSettings Settings { get; private set; }
@@ -91,6 +102,7 @@ public sealed class HostServer : IAsyncDisposable {
 
         var applied = BridgeSettings.Apply(Bridge, settings,
                                            GameDataStore.HasParsedItems(LinuxPaths.DatabaseFile));
+        HookWarning = applied.Error;
         if (applied.Error is not null) {
             Console.Error.WriteLine($"warning: could not configure the hook: {applied.Error}");
         }
@@ -153,7 +165,8 @@ public sealed class HostServer : IAsyncDisposable {
 
         _importer = LootImporter.RunAsync(Bridge, collection, events, transfers,
                                           GameClock.StartTime, () => Settings, AutoAttach,
-                                          Paths, GameData, _shutdown.Token);
+                                          Paths, GameData,
+                                          () => (DiscoveryWarning, HookWarning), _shutdown.Token);
 
         // Grim Dawn's own data first: a patched game, a changed language or a collection that
         // was never parsed. Upstream makes the same check when it starts. The analysis pass

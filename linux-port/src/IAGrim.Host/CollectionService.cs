@@ -574,9 +574,18 @@ public sealed class CollectionService {
             .ToList();
     }
 
-    public HostStatus Status(SteamPaths paths, PrefixBridge bridge, DateTime? gameStartedAt,
+    /// <summary>
+    /// Everything the UI needs to explain itself, including when the news is bad.
+    ///
+    /// <paramref name="paths"/> and <paramref name="bridge"/> are nullable because both can
+    /// legitimately be missing — no Steam, no Proton prefix — and that is the state most in need
+    /// of describing. Refusing to produce a status there left the window saying "Connecting to
+    /// iagd-host…" indefinitely, which is what a host that never started looks like.
+    /// </summary>
+    public HostStatus Status(SteamPaths? paths, PrefixBridge? bridge, DateTime? gameStartedAt,
                              AppSettings? settings = null, bool attaching = false,
-                             bool parsing = false, string? parseStep = null) {
+                             bool parsing = false, string? parseStep = null,
+                             string? setupWarning = null, string? hookWarning = null) {
         using var connection = Open();
 
         // The installation this client is actually using, which is not always the one discovery
@@ -587,7 +596,7 @@ public sealed class CollectionService {
         // Load Database, so the templates stayed at zero and every explanation of why pointed at
         // a missing game folder rather than at the button that was greyed out.
         var current = settings ?? AppSettings.Load();
-        var gameDir = current.GameDir ?? paths.GameDir;
+        var gameDir = current.GameDir ?? paths?.GameDir;
 
         int Count(string table) {
             using var command = connection.CreateCommand();
@@ -642,12 +651,12 @@ public sealed class CollectionService {
         return new HostStatus(
             GameRunning:      gameStartedAt is not null,
             GameStartedAt:    gameStartedAt,
-            HookAttached:     bridge.IsHookLive(gameStartedAt),
-            PendingLootFiles: bridge.PendingLootFiles().Count(),
+            HookAttached:     bridge?.IsHookLive(gameStartedAt) ?? false,
+            PendingLootFiles: bridge?.PendingLootFiles().Count() ?? 0,
             ItemCount:        Count("PlayerItem"),
             TemplateCount:    Count("ItemTemplate"),
             GameDir:          gameDir,
-            BridgeDir:        bridge.Root,
+            BridgeDir:        bridge?.Root,
             DatabaseFile:     _databasePath,
             ItemsNeedingStats: NeedingStats(),
             GameDataStale:    Staleness(),
@@ -658,6 +667,8 @@ public sealed class CollectionService {
             // of this method, and threading it through four call sites would only make it
             // possible for one of them to forget and report an idle client during a rebuild.
             Analysing:        StatRefresh.Running,
-            AnalysisStep:     StatRefresh.Step);
+            AnalysisStep:     StatRefresh.Step,
+            SetupWarning:     setupWarning,
+            HookWarning:      hookWarning);
     }
 }
