@@ -1,4 +1,4 @@
-namespace IAGrim.Host;
+namespace IAGrim.Platform;
 
 /// <summary>
 /// Whether a "loot from" tab and a "deposit to" tab are safe to save together.
@@ -11,7 +11,9 @@ namespace IAGrim.Host;
 /// case explicitly.
 ///
 /// This port has no modal to block a save on, so the check moves to where the save happens
-/// instead — see the guard in ApiRouter's PUT /api/settings.
+/// instead. It lives beside <see cref="AppSettings"/> rather than in the host because there is
+/// more than one writer: PUT /api/settings is one and <c>iagd settings stashToDepositTo</c> is
+/// another. A rule enforced at only one of them is a rule with a way round it.
 /// </summary>
 public static class StashTabGuard {
     public static bool Collide(int stashToLootFrom, int stashToDepositTo) =>

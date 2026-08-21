@@ -911,6 +911,13 @@ internal static class Program {
                     return 1;
             }
 
+            // The same refusal PUT /api/settings makes. Reached from a different direction, so
+            // it has to be checked here too rather than trusted to the caller.
+            if (StashTabGuard.Collide(settings.StashToLootFrom, settings.StashToDepositTo)) {
+                Console.Error.WriteLine($"error: {StashTabGuard.Message}");
+                return 1;
+            }
+
             settings.Save();
             Console.WriteLine($"Set {args[1]} = {value}");
 

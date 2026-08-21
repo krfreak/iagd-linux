@@ -1,6 +1,6 @@
 using Xunit;
 
-namespace IAGrim.Host.Tests;
+namespace IAGrim.Platform.Tests;
 
 /// <summary>
 /// The rule PUT /api/settings enforces before it saves. Upstream's stash picker refuses to
