@@ -45,11 +45,10 @@ internal static class LootImporter {
         var messages = bridge is null ? null : new HookMessageQueue(bridge);
         var firstDrain = true;
 
-        // The last hardcore state the game reported, so the UI is told when it *changes* rather
-        // than on every pass that happens to drain a message. The hook re-sends the same value
-        // freely — message 47 rides along with item initialisation — and a filter that reset
-        // itself every two seconds would fight anyone trying to look at their other stash.
-        bool? lastHardcore = null;
+        // When the game's reported hardcore state is worth passing on. See HardcoreWatch: the
+        // hook asserts the value rather than announcing changes to it, and the first sweep of
+        // the channel is a backlog rather than news.
+        var hardcoreWatch = new HardcoreWatch();
 
         // The last state the UI was told about. Everything the header shows — the game starting,
         // the hook attaching, the collection growing — changes while nobody is making requests,
@@ -89,26 +88,16 @@ internal static class LootImporter {
                 if (messages is not null) {
                     var drained = messages.Drain();
 
-                    if (firstDrain) {
-                        if (drained.Count > 0) {
-                            Console.WriteLine(
-                                $"cleared {drained.Count} message(s) left in the bridge by earlier sessions");
-                        }
+                    if (firstDrain && drained.Count > 0) {
+                        Console.WriteLine(
+                            $"cleared {drained.Count} message(s) left in the bridge by earlier sessions");
                     }
-                    else {
-                        // Last one wins: a pass can drain several, and the most recent is the
-                        // state the game is in now. Drain returns them oldest first.
-                        var reported = drained.Select(m => m.Hardcore)
-                                              .LastOrDefault(state => state is not null);
-
-                        if (reported is bool hardcore && hardcore != lastHardcore) {
-                            lastHardcore = hardcore;
-                            await events.BroadcastAsync(HostEvent.PlayingHardcore(hardcore),
-                                                        cancellationToken);
-                        }
-                    }
-
                     firstDrain = false;
+
+                    if (hardcoreWatch.Observe(drained) is bool hardcore) {
+                        await events.BroadcastAsync(HostEvent.PlayingHardcore(hardcore),
+                                                    cancellationToken);
+                    }
                 }
 
                 // Attach the hook when the game shows up. Paced inside the service: one attempt
