@@ -247,12 +247,13 @@ function replicaRows(stats: ItemStatLine[]): ItemStatLine[] {
   });
 }
 
-function ItemCard({ card, selected, onSelect, onTransfer, transferring }: {
+function ItemCard({ card, selected, onSelect, onTransfer, transferring, hideSkills }: {
   card: ItemCardData;
   selected: boolean;
   onSelect: () => void;
   onTransfer: (all: boolean) => void;
   transferring: boolean;
+  hideSkills: boolean;
 }) {
   const { item, stats, skill, copies } = card;
   const icon = api.iconUrl(item.icon);
@@ -302,7 +303,7 @@ function ItemCard({ card, selected, onSelect, onTransfer, transferring }: {
           ))}
         </ul>
 
-        {skill && (
+        {skill && !hideSkills && (
           <div class="item__skill">
             <div class="item__skill-name">{skill.name ?? 'Granted Skill'}</div>
             {skill.description && <div class="item__skill-text">{skill.description}</div>}
@@ -1294,6 +1295,34 @@ function SettingsView({ onSaved, progress, status }: {
       </div>
 
       <div class="settings__group">
+        <h3>Interface</h3>
+        <label class="settings__row settings__row--check">
+          <input
+            type="checkbox" disabled={saving}
+            checked={settings.hideSkills}
+            onChange={(e) => save({ hideSkills: (e.target as HTMLInputElement).checked })}
+          />
+          <span>Hide an item's granted skill on its card and detail panel</span>
+        </label>
+        <label class="settings__row settings__row--check">
+          <input
+            type="checkbox" disabled={saving}
+            checked={settings.autoDismissNotifications}
+            onChange={(e) => save({ autoDismissNotifications: (e.target as HTMLInputElement).checked })}
+          />
+          <span>Auto dismiss notifications</span>
+        </label>
+        <label class="settings__row settings__row--check">
+          <input
+            type="checkbox" disabled={saving}
+            checked={settings.preferDelayedSearch}
+            onChange={(e) => save({ preferDelayedSearch: (e.target as HTMLInputElement).checked })}
+          />
+          <span>Delay when searching</span>
+        </label>
+      </div>
+
+      <div class="settings__group">
         <h3>Paths</h3>
         <p class="settings__note">
           The collection can live anywhere — including an existing Item Assistant database from a
@@ -1621,7 +1650,7 @@ interface TransferState {
   pending: boolean;
 }
 
-function ItemPanel({ id, transfer, onSend, onCancel, onClose, mods, allowRetarget }: {
+function ItemPanel({ id, transfer, onSend, onCancel, onClose, mods, allowRetarget, hideSkills }: {
   id: number;
   transfer: TransferState | undefined;
   onSend: (id: number, target?: TransferTarget) => void;
@@ -1629,6 +1658,7 @@ function ItemPanel({ id, transfer, onSend, onCancel, onClose, mods, allowRetarge
   onClose: () => void;
   mods: ModInfo[];
   allowRetarget: boolean;
+  hideSkills: boolean;
 }) {
   const [detail, setDetail] = useState<ItemDetail | null>(null);
   // Undefined means "wherever the item came from", which is what upstream does when its
@@ -1665,7 +1695,7 @@ function ItemPanel({ id, transfer, onSend, onCancel, onClose, mods, allowRetarge
             same tooltip twice on one screen is how the old overlay earned its reputation. What
             is here is what the card cannot do — choosing where an item goes, and following the
             transfer once it is queued. */}
-        {detail.skill && (
+        {detail.skill && !hideSkills && (
           <div class="skill">
             <div class="skill__head">
               <span class="skill__name">{detail.skill.name ?? 'Grants a skill'}</span>
@@ -1763,6 +1793,13 @@ function App() {
   const [mods, setMods] = useState<ModInfo[]>([]);
   // Choosing a target stash is gated on the same setting upstream gates its stash picker with.
   const [allowRetarget, setAllowRetarget] = useState(false);
+  // Whether the granted-skill block is left off a card and its detail panel.
+  const [hideSkills, setHideSkills] = useState(false);
+  // Whether a notification fades on its own; see the effect below for how this combines with
+  // window focus.
+  const [autoDismissNotifications, setAutoDismissNotifications] = useState(true);
+  // Whether the search debounce below waits 200ms or fires immediately.
+  const [preferDelayedSearch, setPreferDelayedSearch] = useState(true);
   const [items, setItems] = useState<ItemCardData[]>([]);
   const [total, setTotal] = useState(0);
   // Cards are what the list pages through; items are what the window reports. Identical items
@@ -1820,13 +1857,14 @@ function App() {
 
   const search: ItemFilters = { ...filters, q: query };
 
-  // Debounced search: typing should not fire a request per keystroke.
+  // Debounced search: typing should not fire a request per keystroke. Upstream's
+  // PreferDelayedSearch decides the same 200ms-or-0 choice (UpdateListViewDelayed).
   useEffect(() => {
     if (tab !== 'items') return;
-    const handle = setTimeout(() => { load(search).catch(() => {}); }, 200);
+    const handle = setTimeout(() => { load(search).catch(() => {}); }, preferDelayedSearch ? 200 : 0);
     return () => clearTimeout(handle);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, JSON.stringify(filters), tab, dataVersion]);
+  }, [query, JSON.stringify(filters), tab, dataVersion, preferDelayedSearch]);
 
   /*
    * Reload once the host finishes reading Grim Dawn's data or analysing the collection.
@@ -1870,7 +1908,12 @@ function App() {
         });
       })
       .catch(() => {});
-    api.settings().then((s) => setAllowRetarget(s.transferAnyMod)).catch(() => {});
+    api.settings().then((s) => {
+      setAllowRetarget(s.transferAnyMod);
+      setHideSkills(s.hideSkills);
+      setAutoDismissNotifications(s.autoDismissNotifications);
+      setPreferDelayedSearch(s.preferDelayedSearch);
+    }).catch(() => {});
 
     return subscribe((event: HostEvent) => {
       switch (event.type) {
@@ -2036,9 +2079,15 @@ function App() {
 
   useEffect(() => {
     if (!toast) return;
+    // Upstream fades a notification unconditionally when its window has focus — the player is
+    // already looking at it — and otherwise only when AutoDismissNotifications is on
+    // (CefBrowserHandler.ShowMessage). There is no foreground-window API to call here, so
+    // document.hasFocus() stands in for IsProgramActive.IsActive(): both answer "is this window
+    // what the player is looking at right now", just for a webview instead of a Win32 window.
+    if (!document.hasFocus() && !autoDismissNotifications) return;
     const handle = setTimeout(() => setToast(null), 4000);
     return () => clearTimeout(handle);
-  }, [toast]);
+  }, [toast, autoDismissNotifications]);
 
   /**
    * Sends items to the game, one request each.
@@ -2212,6 +2261,7 @@ function App() {
                           onSelect={() => setSelected(card.item.id)}
                           onTransfer={(all) => transferFromCard(card, all)}
                           transferring={Boolean(transfers[card.item.id]?.pending)}
+                          hideSkills={hideSkills}
                         />
                       ))}
                       {items.length < total && (
@@ -2242,6 +2292,7 @@ function App() {
                 onClose={() => setSelected(null)}
                 mods={mods}
                 allowRetarget={allowRetarget}
+                hideSkills={hideSkills}
                 transfer={transfers[selected]}
                 // The same path the cards use, rather than a second copy of it: the panel had
                 // its own queueing logic and so would have needed its own answer to a refusal.

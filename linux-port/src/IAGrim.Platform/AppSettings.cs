@@ -80,6 +80,50 @@ public sealed class AppSettings : ICloudSettings {
     /// </summary>
     public bool TransferAnyMod { get; set; }
 
+    /// <summary>
+    /// Whether an item's granted-skill block is left off its card and detail panel. Upstream's
+    /// <c>HideSkills</c>, bound to the "Hide Skills" checkbox in its settings window and applied
+    /// by skipping <c>ApplySkills</c> in ItemStatService.
+    ///
+    /// Upstream's own default hides the block on a fresh install — its backing field defaults to
+    /// true, not false. This port has never had the toggle at all and has always drawn the
+    /// block, so copying that default would silently hide skills for every existing user the
+    /// moment they update. Defaulting to false keeps what they already see; the box is there for
+    /// anyone who wants upstream's default instead.
+    /// </summary>
+    public bool HideSkills { get; set; }
+
+    /// <summary>
+    /// Whether a notification fades on its own rather than sitting until dismissed. Upstream's
+    /// <c>AutoDismissNotifications</c>.
+    ///
+    /// Upstream only consults this when its window lacks focus: CefBrowserHandler.ShowMessage
+    /// fades regardless of the setting whenever <c>IsProgramActive.IsActive()</c> is true, on
+    /// the theory that a focused window means the player is already looking at the message. The
+    /// setting is for the other case — a notification arriving while the player is alt-tabbed
+    /// into the game, where there is no cue telling them to alt-tab back before it vanishes on
+    /// its own. This port has no foreground-window API to call; <c>document.hasFocus()</c> is
+    /// the honest substitute, since it answers the same question ("is anyone looking at this
+    /// window right now") for a webview instead of a Win32 window. Defaults to true, matching
+    /// both upstream's own default for a fresh install (SettingsService.Load) and this port's
+    /// existing hardcoded behaviour, where the toast has always faded after four seconds no
+    /// matter what.
+    /// </summary>
+    public bool AutoDismissNotifications { get; set; } = true;
+
+    /// <summary>
+    /// Whether the item list waits 200ms after a keystroke before searching, rather than
+    /// searching immediately. Upstream's <c>PreferDelayedSearch</c>
+    /// (SplitSearchWindow.UpdateListViewDelayed: <c>PreferDelayedSearch ? 200 : 0</c>).
+    ///
+    /// Upstream defaults this off, searching on every keystroke. This port has never had the
+    /// option and has always debounced by 200ms, which is upstream's *enabled* behaviour —
+    /// copying upstream's raw default would turn search instant for everyone already used to the
+    /// delay. Defaulting to true keeps the port's existing feel unchanged; unchecking the box is
+    /// what makes search immediate.
+    /// </summary>
+    public bool PreferDelayedSearch { get; set; } = true;
+
     // ------------------------------------------------------------------- online sync
     //
     // See ICloudSettings for what each of these means and which of upstream's two settings
