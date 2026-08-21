@@ -416,6 +416,15 @@ public sealed class ApiRouter {
                 incoming.StashToLootFrom = Math.Max(0, incoming.StashToLootFrom);
                 incoming.StashToDepositTo = Math.Max(0, incoming.StashToDepositTo);
 
+                // Everything this page does not own is carried across from what is already
+                // stored. The body is whatever the settings page holds, and the settings page is
+                // served the payload below — which has never included the online-sync keys,
+                // since they are managed by the Online tab and one of them is a credential.
+                // Deserialising into a fresh object and saving it therefore wrote defaults over
+                // the session token: changing a stash tab logged the user out of online sync,
+                // and the only visible sign was at the next start.
+                incoming.CarryOverUnmanaged(_server.Settings);
+
                 var error = _server.UpdateSettings(incoming);
                 await Json_(context, new {
                     settings = SettingsPayload(),

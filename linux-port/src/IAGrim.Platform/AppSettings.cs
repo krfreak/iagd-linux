@@ -121,6 +121,31 @@ public sealed class AppSettings : ICloudSettings {
     /// </summary>
     public string? ClientId { get; set; }
 
+    /// <summary>
+    /// Copies the keys no settings form owns across from <paramref name="stored"/>.
+    ///
+    /// The settings page sends back the object it was given, and what it was given has never
+    /// included these: they belong to the Online tab, which has its own endpoints, and one of
+    /// them is a session token. Without this, a request that simply omits them is indistinguishable
+    /// from one asking for the defaults — so saving a stash tab index silently signed the user out.
+    ///
+    /// A whitelist rather than a merge because the direction matters: the caller's object is the
+    /// new preferences, and these are state it has no business restating.
+    /// </summary>
+    public void CarryOverUnmanaged(AppSettings stored) {
+        CloudUser = stored.CloudUser;
+        CloudAuthToken = stored.CloudAuthToken;
+        CloudUploadTimestamp = stored.CloudUploadTimestamp;
+        UsingDualComputer = stored.UsingDualComputer;
+        BuddySyncUserIdV3 = stored.BuddySyncUserIdV3;
+        OptOutOfBackups = stored.OptOutOfBackups;
+        LastCharSyncUtc = stored.LastCharSyncUtc;
+
+        // Minted once and then never changed: a new one would make this installation look like a
+        // different one to the sync service.
+        ClientId = stored.ClientId;
+    }
+
     // ---------------------------------------------------------------- persistence
 
     private static readonly JsonSerializerOptions Json = new() {
