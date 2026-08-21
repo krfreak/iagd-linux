@@ -36,6 +36,11 @@ public static class GameDataParse {
             progress?.Invoke($"warning: could not back up before parsing: {ex.Message}");
         }
 
+        // Read before anything is stored, and written back only once everything has been. Taking
+        // it at the end would record a game updated *during* the parse as one this parse had
+        // read, and the difference is a collection that never notices it is a patch behind.
+        var sourceTimestamp = ItemDatabase.GetHighestTimestamp(gameDir);
+
         var available = ItemDatabase.FindLanguages(gameDir);
         if (!available.Contains(language, StringComparer.OrdinalIgnoreCase)) {
             progress?.Invoke($"warning: no Text_{language}.arc in this installation; using English.");
@@ -85,9 +90,6 @@ public static class GameDataParse {
 
         // A mod removed since the last parse would otherwise keep winning the mod-first lookup
         // for items still tagged with it, naming them from a mod the player no longer has.
-        // What this parse was made from, so a later run can tell whether it is still current.
-        store.RecordParseSource(ItemDatabase.GetHighestTimestamp(gameDir), language);
-
         var dropped = store.RemoveTemplatesForMissingMods(mods.Select(m => m.Name));
         if (dropped > 0) {
             progress?.Invoke($"  dropped templates for {dropped} uninstalled mod(s)");
@@ -116,6 +118,13 @@ public static class GameDataParse {
         }
         var icons = Directory.GetFiles(LinuxPaths.IconDir, "*.png").Length;
         progress?.Invoke($"  {icons:N0} icons ({icons - iconsBefore:N0} new) in {LinuxPaths.IconDir}");
+
+        // Last, because this is what a later run reads to decide the stored data is current —
+        // so it has to mean "all of the above happened", not "some of it did". Written early, it
+        // marked a parse complete before the skills and icons were in: closing the window at the
+        // wrong moment left a database that looked freshly read, refused to read itself again,
+        // and could only be recovered by deleting it by hand.
+        store.RecordParseSource(sourceTimestamp, language);
 
         stopwatch.Stop();
         var named = templates.Values.Count(t => t.Name is not null);
