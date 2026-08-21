@@ -2212,3 +2212,105 @@ where an upload that fails at the storage step still leaves the name in `GET /ch
 Upstream has the same branch but leaves it commented out, so its `localdev` falls through to
 production. Here it resolves, because the tests run a real server and pointing them at
 `api.iagd.evilsoft.net` is precisely the thing this feature must never do.
+
+---
+
+## The settings page
+
+Upstream's settings live in one WinForms tab (`IAGrim/UI/Tabs/SettingsWindow.cs`) plus three
+dialogs it opens: `StashTabPicker`, `LanguagePackPicker` and `ImportExportContainer`. This port
+has one Settings page instead, and `IAGrim/UI/Tabs/SettingsWindow.cs` is tracked in
+`upstream-sync.tsv` precisely so that a new control there arrives as a reported change rather than
+as something nobody noticed.
+
+What is *not* ported from that tab, and why, is in [BACKLOG.md](BACKLOG.md). This section is the
+other half: the things that are, and the two places where matching upstream exactly would have
+been the wrong call.
+
+### Two defaults deliberately differ from upstream
+
+Both are display preferences rather than data, and in both cases upstream's literal default would
+have changed what an existing user of this port sees the moment they updated.
+
+- **`HideSkills`** — upstream's backing field is `_hideSkills ?? true`, so a fresh Windows install
+  hides an item's granted skill. This port has never had the toggle and has always drawn the
+  block. Defaulting to `true` here would have made granted skills vanish on update, with the
+  explanation sitting in a checkbox nobody had reason to look at.
+- **`PreferDelayedSearch`** — upstream defaults it off, searching on every keystroke
+  (`SplitSearchWindow.cs:229`, `PreferDelayedSearch ? 200 : 0`). This port has always debounced by
+  200 ms, which is upstream's *enabled* state.
+
+`AutoDismissNotifications` needed no such decision: upstream's fresh-install default is `true`
+(`SettingsService.Load`) and this port's hardcoded behaviour was already the same. Its one subtlety
+is that upstream consults the setting only when its window lacks focus — a focused window fades
+regardless — and `document.hasFocus()` is what stands in for `IsProgramActive.IsActive()` here.
+
+### Rules enforced where the setting is written, not where the form is
+
+Upstream can refuse in a dialog: `StashTabPicker` simply will not close while the loot tab and the
+deposit tab are the same non-zero tab, because deposits would land in the tab the importer is
+about to empty. This port has no modal to block on — the settings page saves on every change — so
+the refusal moved to the save itself, and `StashTabGuard` lives in `IAGrim.Platform` beside
+`AppSettings` rather than in the host.
+
+That placement is the point. There are two writers: `PUT /api/settings` and
+`iagd settings stashToDepositTo`. The guard was on the first one only to begin with, which left
+the collision reachable from a terminal and read by the hook exactly the same way. A rule enforced
+at one of two doors is not a rule.
+
+### Opening a folder is by name, never by path
+
+Upstream's "View Backups" and "View Logs" buttons call `Process.Start` on a path. The equivalent
+here is `POST /api/open-folder` taking a *name* that `KnownFolders` resolves, not a path — because
+the host answers on `127.0.0.1:5680` and any page a browser has open can reach it, so a path
+parameter would be a general "launch anything on this machine" primitive sitting next to a
+carefully allowlisted link opener.
+
+There is no log folder to open. This port logs to stdout and stderr, so the counterpart of "View
+Logs" is `journalctl` or the terminal it was started from, and a button cannot help with either.
+
+### Starting minimized, and one thing Photino cannot do
+
+`StartMinimized` is ported and verified by running it: under X11 the window arrives with
+`WM_STATE` `Iconic` and `_NET_WM_STATE_HIDDEN` with the setting on, and `Normal` with it off.
+
+Upstream pairs it with `MinimizeToTray`, which *hides* the window so only the tray icon remains.
+**That cannot be built on Photino 4.0.16**, which exposes no visibility control at all — the
+native library's whole window-state surface is `Photino_GetMinimized` and `Photino_SetMinimized`.
+BACKLOG entry 4 records the evidence and the condition for revisiting it.
+
+Verifying the buildable half turned up a bug in code that already shipped. `PhotinoWindow.Minimized`
+reads `false` under a Wayland session no matter how many times `SetMinimized(true)` has been
+called and whatever the window is really doing; under X11 the same getter is correct. The tray
+toggle asked it — `SetMinimized(!window.Minimized)` — so on Wayland every click computed `!false`
+and minimized again, and bringing the window back from the tray was impossible. The state is now
+tracked in `Program.cs` and corrected by the window's own minimized and restored events. This is
+the third time in this document that executing found something reading could not.
+
+### The collection view follows the character being played
+
+Upstream switches the visible filter when the game reports what is running
+(`MainWindow.cs:423`, `ModSelectionHandler.UpdateModSelection`). Ported, with one half deleted
+rather than built: **`TYPE_GameInfo_SetModName` has no sender in either tree**, so upstream's
+handler for the mod name has never run. The hook resolves the mod name internally to choose a loot
+folder and never puts it on the wire. Porting the hardcore axis alone therefore reaches full
+runtime parity, because the mod axis never fires for upstream either.
+
+The hardcore state does arrive: `SetHardcore::HookedMethod` sends message 20 with a one-byte
+payload, `InventorySack_AddItem.cpp:179` sends message 47 with the same value, and under Wine mode
+every queued message is written to `linuxhack/*.msg`. `HookMessageQueue` used to parse the 8-byte
+header and drop the payload; it now carries it.
+
+Turning that stream into something worth acting on is `HardcoreWatch`, and each of its three rules
+exists because of a specific failure:
+
+- **The first drained batch is swallowed.** Nothing consumed this channel before this port, so the
+  first sweep of a session clears everything the DLL has ever written — 522 files on one install,
+  some of them weeks old. Acting on it would open the app on whatever stash was last played.
+- **Last one wins**, because `Drain` returns oldest first and only the newest describes the present.
+- **Only changes are announced**, because the hook asserts the value rather than announcing changes
+  to it, and a filter that reset itself every two seconds would fight anyone looking at their other
+  stash.
+
+The UI half copies upstream's refusal to switch to a branch that holds no items (`if (query.Any())`).
+Answering "you started a hardcore character" with an empty grid is worse than not answering.

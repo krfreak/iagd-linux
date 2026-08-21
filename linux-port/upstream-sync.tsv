@@ -94,3 +94,8 @@ IAGrim/Database/Model/BuddyItem.hbm.xml	src/IAGrim.Platform/Schema.cs	buddyitems
 # merges a buddy's items into the search results. Nothing here reproduces it yet.
 IAGrim/UI/Controller/SearchController.cs	src/IAGrim.Host/CollectionService.cs	BACKLOG 1: merging buddy items into search results
 IAGrim/UI/Tabs/OnlineSettings.cs	src/IAGrim.Host/CloudApi.cs	what logging out and deleting an account throw away
+IAGrim/Services/ItemStatService.cs	src/WebUI/src/main.tsx	HideSkills: which items get their granted skill drawn
+IAGrim/UI/Popups/StashTabPicker.cs	src/IAGrim.Platform/StashTabGuard.cs	The refusal to point loot-from and deposit-to at one tab, and the exemption for 0
+IAGrim/UI/Misc/MinimizeToTrayHandler.cs	src/IAGrim.App/Program.cs	StartMinimized on launch; MinimizeToTray is blocked, see BACKLOG
+IAGrim/UI/Tabs/SplitSearchWindow.cs	src/WebUI/src/main.tsx	PreferDelayedSearch: the 200ms search debounce and the option to drop it
+IAGrim/UI/Tabs/Util/ModSelectionHandler.cs	src/IAGrim.Platform/HardcoreWatch.cs	Following the running game's hardcore state, and not switching to an empty branch
