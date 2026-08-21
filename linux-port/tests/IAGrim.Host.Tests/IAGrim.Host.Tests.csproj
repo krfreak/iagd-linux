@@ -9,9 +9,17 @@
   </PropertyGroup>
 
   <!--
+    Two kinds of thing live here.
+
     The transfer path, which is the one place in this port where a mistake creates items out of
-    nothing. Everything here runs against a throwaway prefix root and a throwaway database, so
+    nothing. Everything for it runs against a throwaway prefix root and a throwaway database, so
     the deletion rule can be exercised without touching a real collection.
+
+    And the decisions behind individual routes. ApiRouter dispatches on a real
+    HttpListenerContext, which nothing outside HttpListener can construct, so the router itself is
+    not what these test; the judgements are pulled out of its switch as plain static logic —
+    whether a pair of stash tabs is safe to save together (StashTabGuard), which names
+    /api/open-folder will resolve (KnownFolders) — and checked without a server or a listener.
   -->
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
@@ -21,6 +29,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/IAGrim.Host/IAGrim.Host.csproj" />
+    <ProjectReference Include="../../src/IAGrim.Platform/IAGrim.Platform.csproj" />
   </ItemGroup>
 
 </Project>

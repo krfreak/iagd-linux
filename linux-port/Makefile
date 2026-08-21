@@ -68,9 +68,9 @@ host: ui
 	dotnet run --project $(HOST)
 
 # The cloud tests need a real backup server on loopback; it is built on first run and never
-# points at api.iagd.evilsoft.net (see tests/IAGrim.Cloud.Tests). The platform and core tests
-# need nothing and run in milliseconds, so they go first — a broken attach pace or a mis-composed
-# item name should not wait behind a Go build.
+# points at api.iagd.evilsoft.net (see tests/IAGrim.Cloud.Tests). The platform, core and host
+# tests need nothing and run in milliseconds, so they go first — a broken attach pace or a
+# mis-composed item name should not wait behind a Go build.
 test:
 	dotnet test $(PLATFORM_TESTS) -v q --nologo
 	dotnet test $(CORE_TESTS) -v q --nologo

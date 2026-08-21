@@ -294,6 +294,26 @@ public sealed class ApiRouter {
                 return;
             }
 
+            // The Settings page's counterpart to upstream's "Open Data Folder" button. Named
+            // rather than a path for the same reason as /api/open above — see KnownFolders.
+            case ("POST", "/api/open-folder"): {
+                var openFolder = await ReadJsonAsync<OpenFolderRequest>(context);
+                var folder = KnownFolders.Resolve(openFolder?.Name ?? "");
+
+                if (folder is null) {
+                    await Json_(context, new { error = "not a known folder" }, 400);
+                    return;
+                }
+
+                // xdg-open opens a directory in the desktop's file manager just as readily as
+                // it opens a URL in a browser, so the same fallback contract applies: when
+                // there is no desktop session to hand it to, the path comes back so the page
+                // can show it as text instead.
+                var openedFolder = DesktopBrowser.Open(folder, out var folderError);
+                await Json_(context, new { opened = openedFolder, error = folderError, path = folder });
+                return;
+            }
+
             case ("POST", "/api/parse"): {
                 var parse = await ReadJsonAsync<ParseRequest>(context);
                 var settings = _server?.Settings ?? AppSettings.Load();
@@ -415,6 +435,17 @@ public sealed class ApiRouter {
                 // read it and behave unpredictably rather than reject it.
                 incoming.StashToLootFrom = Math.Max(0, incoming.StashToLootFrom);
                 incoming.StashToDepositTo = Math.Max(0, incoming.StashToDepositTo);
+
+                // Upstream refuses to close its stash picker over this same collision
+                // (StashTabPicker.cs) rather than let it be saved at all — the settings page
+                // has no modal to block on, so the refusal moves to the save itself. Rejecting
+                // outright, rather than clamping one side, is what keeps the UI honest: it
+                // saves on every field change, and a value it silently altered would show as
+                // if the user had typed it.
+                if (StashTabGuard.Collide(incoming.StashToLootFrom, incoming.StashToDepositTo)) {
+                    await Json_(context, new { error = StashTabGuard.Message }, 400);
+                    return;
+                }
 
                 // Everything this page does not own is carried across from what is already
                 // stored. The body is whatever the settings page holds, and the settings page is
@@ -875,6 +906,7 @@ public sealed class ApiRouter {
           GET  /api/mods                  mods with items in the collection or parsed
           GET  /api/browse                is a native file chooser available
           POST /api/browse                {directory, title, path} -> chosen path
+          POST /api/open-folder           {name} -> opens a known directory (backups)
           POST /api/merge                 {path, dryRun} -> merge another collection in
           GET  /api/settings              settings, and what the hook actually sees
           PUT  /api/settings              {stashToLootFrom, stashToDepositTo, language, gameDir}

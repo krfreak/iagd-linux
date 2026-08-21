@@ -536,12 +536,20 @@ export const api = {
 
   mods: () => fetch('/api/mods').then(json<ModInfo[]>),
 
+  /**
+   * The host can refuse a save outright — currently only when Loot from and Deposit to would
+   * end up on the same tab — rather than silently store something that would fight itself the
+   * next time an item is looted. `jsonOrError` rather than `json` because that refusal is a
+   * 400 the caller needs the body of, not an exception: this page saves on every field change,
+   * and the settings the store still holds are whatever the last *successful* save left it
+   * with, so a thrown exception here would leave nothing for the caller to fall back to.
+   */
   saveSettings: (settings: Partial<Settings>) =>
     fetch('/api/settings', {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(settings),
-    }).then(json<{ settings: Settings; warning: string | null; message: string }>),
+    }).then(jsonOrError<{ settings?: Settings; warning?: string | null; message?: string; error?: string }>),
 
   items: (filters: ItemFilters, skip: number, take: number) => {
     const params = filterParams(filters);
@@ -598,6 +606,21 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url }),
     }).then(json<{ opened: boolean; error?: string }>),
+
+  /**
+   * Asks the host to open one of the directories it knows about by name — currently just
+   * "backups", where a copy of the collection database is saved before anything that could
+   * lose data. Named rather than a path for the same reason `open` above is allowlisted to a
+   * fixed set of URLs: the endpoint is reachable by any page a browser has open while the
+   * client is running. `path` comes back either way, so the page can show it as text when
+   * there is nothing to hand it to.
+   */
+  openFolder: (name: string) =>
+    fetch('/api/open-folder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    }).then(json<{ opened: boolean; error?: string; path?: string }>),
 
   item: (id: number) => fetch(`/api/items/${id}`).then(json<ItemDetail>),
 
