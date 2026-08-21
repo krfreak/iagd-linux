@@ -1156,8 +1156,16 @@ function SettingsView({ onSaved, progress, status }: {
     setSaving(true);
     try {
       const result = await api.saveSettings({ ...settings, ...next });
-      setSettings(result.settings);
-      onSaved(result.warning ?? result.message);
+      // The host refuses a save outright rather than store it — currently only when the two
+      // stash tabs would collide. `settings` state is simply left untouched in that case: it
+      // already holds whatever the last successful save stored, which is the coherent thing
+      // for the inputs to keep showing, since nothing the user just typed actually took.
+      if (result.error) {
+        onSaved(result.error);
+        return;
+      }
+      setSettings(result.settings!);
+      onSaved(result.warning ?? result.message!);
     } finally {
       setSaving(false);
     }

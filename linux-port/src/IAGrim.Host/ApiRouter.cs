@@ -436,6 +436,17 @@ public sealed class ApiRouter {
                 incoming.StashToLootFrom = Math.Max(0, incoming.StashToLootFrom);
                 incoming.StashToDepositTo = Math.Max(0, incoming.StashToDepositTo);
 
+                // Upstream refuses to close its stash picker over this same collision
+                // (StashTabPicker.cs) rather than let it be saved at all — the settings page
+                // has no modal to block on, so the refusal moves to the save itself. Rejecting
+                // outright, rather than clamping one side, is what keeps the UI honest: it
+                // saves on every field change, and a value it silently altered would show as
+                // if the user had typed it.
+                if (StashTabGuard.Collide(incoming.StashToLootFrom, incoming.StashToDepositTo)) {
+                    await Json_(context, new { error = StashTabGuard.Message }, 400);
+                    return;
+                }
+
                 // Everything this page does not own is carried across from what is already
                 // stored. The body is whatever the settings page holds, and the settings page is
                 // served the payload below — which has never included the online-sync keys,

@@ -523,12 +523,20 @@ export const api = {
 
   mods: () => fetch('/api/mods').then(json<ModInfo[]>),
 
+  /**
+   * The host can refuse a save outright — currently only when Loot from and Deposit to would
+   * end up on the same tab — rather than silently store something that would fight itself the
+   * next time an item is looted. `jsonOrError` rather than `json` because that refusal is a
+   * 400 the caller needs the body of, not an exception: this page saves on every field change,
+   * and the settings the store still holds are whatever the last *successful* save left it
+   * with, so a thrown exception here would leave nothing for the caller to fall back to.
+   */
   saveSettings: (settings: Partial<Settings>) =>
     fetch('/api/settings', {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(settings),
-    }).then(json<{ settings: Settings; warning: string | null; message: string }>),
+    }).then(jsonOrError<{ settings?: Settings; warning?: string | null; message?: string; error?: string }>),
 
   items: (filters: ItemFilters, skip: number, take: number) => {
     const params = filterParams(filters);
