@@ -615,7 +615,7 @@ Comparing against the controls on `SettingsWindow`, rather than against the sett
 
 Not settings, but reachable from the same area: `OnlineSettings` is cloud (deferred) and
 `ModsDatabaseConfig` configures which install and mod to parse — this port discovers both, with
-`gameDir` as the manual override.
+`gameDir` and `prefixDir` as the manual overrides.
 
 ### Granted skills are shown, not just filtered on
 
@@ -646,6 +646,14 @@ say which one is out of date. Upstream keeps the same two facts, as
 Verified by ageing the recorded timestamp and by switching language — each produces its own
 message, and clearing them silences it.
 
+**The marker is written last, and that is the whole of it.** It was written partway through —
+after the templates, before the skills and the icons — so a parse interrupted in the middle left
+a database that read as freshly parsed. Nothing re-read it, no templates were listed, no item
+had a name, and the only way out was to find the file under `~/.local/share` and delete it by
+hand. The timestamp is still *taken* first, so a game updated during a parse is not recorded as
+one this parse had read; it is only committed at the end, where it means "all of the above
+happened" rather than "some of it did".
+
 ### Settings, and the one that is not optional
 
 Two settings files, deliberately:
@@ -675,6 +683,38 @@ malformed file is refused rather than replaced, for the same reason.
 
 The settings UI shows what the hook will *actually* read alongside what is saved, because those
 can disagree and the symptom of a disagreement is loot quietly not arriving.
+
+**The bridge directory has to be created, not assumed.** It belongs to the hook DLL, which makes
+it the first time it runs — so on a prefix the hook has never been injected into, and on one
+where someone deleted the `EvilSoft` folder to start clean, it is simply absent. Writing into it
+then failed with `Could not find a part of the path …\settings.json.tmp`, and repaired itself at
+random: every other path on `PrefixBridge` creates its directory on the way out, so once an
+unrelated call in the same session had made the parent, the next attempt worked. Reported from
+the field as "after restarting a few times it eventually wrote it".
+
+#### The prefix is settable, because discovery only knows Steam's layout
+
+`prefixDir` is this port's one setting with no upstream counterpart, and it earns the exception.
+Upstream is a Windows program talking to a hook in another Windows process: the two agree on
+`%LOCALAPPDATA%` and there is nothing to configure. Here that directory lives inside a Wine
+prefix, and `SteamPaths` finds it in exactly one place — `steamapps/compatdata/219990/pfx` under
+a library named in `libraryfolders.vdf`. A prefix Steam did not make, one that was moved, or a
+library described in a way the .vdf reader cannot follow is invisible to it, and an invisible
+prefix is not a degraded mode: it is no loot capture, no transfers back, and nothing in the UI
+able to change that.
+
+Two things make it work rather than merely store a string:
+
+- **Either spelling is accepted** — the compatdata folder (which holds `pfx`) or the prefix
+  itself (which holds `drive_c`). Both are things people call "the prefix", and rejecting one
+  would be a setting that silently does nothing.
+- **The attach script is told what the host resolved.** `_discover.sh` repeats the same
+  discovery in bash and dies the same way; `IAGD_GAME_DIR` and `IAGD_COMPAT_DATA` override it,
+  and `HookAttacher` sets both. Without that, a hand-set path would fix the loot channel and
+  leave nothing able to open it.
+
+A path that is neither is refused at startup with a message naming it, rather than quietly
+building a bridge onto a directory no hook will ever write to.
 
 **`transferAnyMod` used to be a setting that did nothing.** It was stored, listed by
 `iagd settings`, returned by the API and rendered as a checkbox — and no code read it. That is
@@ -712,6 +752,38 @@ through the hook, which made them already localised and already grammatical, at 
 being available only for items looted while playing. They are now composed here from the same
 tags upstream composes them from, which needs the gender handling for exactly the reason above;
 see *An item's name is composed, not remembered*.
+
+### Nothing working is a state that has to be reported
+
+The status bar had a message for every condition except the worst one. With no Proton prefix,
+`/api/status` answered 503, the page's `.catch(() => {})` swallowed it, and the window sat on
+"Connecting to iagd-host…" — which is also what a host that never started looks like. The
+explanation existed, on stderr, behind a window with no terminal.
+
+Worse, the loot importer *returned* when there was no bridge, and that loop is the only thing
+that pushes a status frame. So a client in this state reported nothing at all: not the parse it
+was running, not the analysis after it, not that it was alive. "No feedback about when the
+database is parsed" was this, and the parse was the least of what went unreported.
+
+Three changes, all the same shape — say the thing rather than withhold it:
+
+- `HostStatus` carries `SetupWarning` (no Steam, no prefix, or a configured path that is not a
+  prefix) and `HookWarning` (the hook's settings file could not be written). Both were console
+  lines; both are now sentences in the status bar and alerts on the settings page, which is
+  where the path that fixes them is set.
+- The status endpoint answers unconditionally, and `CollectionService.Status` takes a nullable
+  `SteamPaths` and `PrefixBridge`. A client with no prefix still has a collection to show.
+- The importer's loop no longer returns early. Its bridge-dependent half is guarded instead —
+  guarded rather than `continue`d, because the delay is below it and an early exit would spin.
+
+**A read must not create what it is looking at.** Every path on `PrefixBridge` creates its
+directory on the way out, which is right for the ones about to be written into and wrong for
+`IsHookLive` and `PendingLootFiles`: both are on the status path, so a prefix this process cannot
+write to made the status endpoint throw and put the client straight back to showing nothing. They
+now use non-creating paths and treat an unreadable directory as "no hook, nothing pending".
+
+A permanent failure is also said once rather than every two seconds. An unwritable prefix
+produced 45 identical lines in 25 seconds of running; the same run now produces one.
 
 ### The window has to keep itself up to date
 
@@ -1084,6 +1156,20 @@ upstream does the same, resetting an unparseable box on `Leave`. Because the box
 hold a value, "is anything narrowing the list" has to compare against the defaults rather than
 test for emptiness; otherwise an untouched client reports itself as filtered and tells a new user
 "nothing matching those filters" when the truth is "no items yet".
+
+**"`<= 110` excludes nothing" was true of every item that had been analysed, and only those.**
+`LevelRequirement` is filled in by the analysis pass, and a NULL fails that comparison — so an
+item looted before Grim Dawn's data had been read was written to the collection, counted in the
+collection, listed under Grim Dawn, and absent from the item list, with the UI correctly
+reporting no filter as active. It came back by raising the maximum past 120, which drops the
+clause altogether; the level 94 items it had been hiding were then plainly visible. Reported from
+the field as "5 items in collection, displaying 2/2".
+
+Upstream never sees this: its `LevelRequirement` is a non-nullable double, so its undescribed
+items are level 0 and compare fine. This port now writes 0 on import for the same reason, and
+`Schema.NormaliseToUpstreamValues` repairs the rows already written — the same treatment the
+NULL record columns got, and for the same reason. Zero is a placeholder, not an answer: the
+analysis pass selects on `Rarity IS NULL` and still overwrites it.
 
 ### Derived data has a version, and so does the parse
 
