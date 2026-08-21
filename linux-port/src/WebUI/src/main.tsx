@@ -1877,12 +1877,21 @@ function App() {
         case 'itemLooted': {
           setStatus((s) => (s ? { ...s, itemCount: s.itemCount + 1 } : s));
           setToast(`Looted ${stripGrimText(event.data.item.name)}`);
-          // Only fold it into the visible list when nothing is narrowing it; otherwise the
-          // grid would contradict its own filters. The host does not re-run the query per
-          // event, so a match cannot be tested here.
+          // Only fold it into the visible list when nothing is narrowing or reordering it;
+          // otherwise the grid would contradict its own filters, or put the item somewhere the
+          // sort does not. The host does not re-run the query per event, so neither whether it
+          // matches nor where it belongs can be decided here.
           if (!queryRef.current.trim() && !filteredRef.current) {
             setItems((current) => [event.data, ...current]);
             setTotal((t) => t + 1);
+            setTotalItems((t) => t + 1);
+          } else {
+            // Ask the host instead. Only it can say whether the new item passes the filters and
+            // where the ordering puts it, and doing nothing at all is what made a list look
+            // frozen the moment any filter or sort was on. Upstream re-runs the search here for
+            // the same reason (MainWindow.ListviewUpdateTrigger, "otherwise people freak out"),
+            // and the load effect debounces, so a stash emptied in one go costs one query.
+            setDataVersion((v) => v + 1);
           }
           break;
         }
