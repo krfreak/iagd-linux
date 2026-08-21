@@ -756,6 +756,7 @@ public sealed class ApiRouter {
             settings.PrefixDir,
             settings.TransferAnyMod,
             settings.AutoAttach,
+            settings.StartMinimized,
             settings.HideSkills,
             settings.AutoDismissNotifications,
             settings.PreferDelayedSearch,

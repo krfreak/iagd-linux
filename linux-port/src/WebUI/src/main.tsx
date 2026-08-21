@@ -1331,6 +1331,23 @@ function SettingsView({ onSaved, progress, status }: {
       </div>
 
       <div class="settings__group">
+        <h3>Window</h3>
+        <p class="settings__note">
+          This sits beside a fullscreen game and gets alt-tabbed to for a few seconds at a time,
+          so starting it alongside Grim Dawn should not mean a window in the way. The tray icon
+          brings it back — it is always there, whether or not the window is.
+        </p>
+        <label class="settings__row settings__row--check">
+          <input
+            type="checkbox" disabled={saving}
+            checked={settings.startMinimized}
+            onChange={(e) => save({ startMinimized: (e.target as HTMLInputElement).checked })}
+          />
+          <span>Start minimized</span>
+        </label>
+      </div>
+
+      <div class="settings__group">
         <h3>Paths</h3>
         <p class="settings__note">
           The collection can live anywhere — including an existing Item Assistant database from a

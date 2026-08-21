@@ -398,6 +398,7 @@ export interface Settings {
   transferAnyMod: boolean;
   /** Attach the hook automatically when Grim Dawn is detected. */
   autoAttach: boolean;
+  startMinimized: boolean;
   /** Leave an item's granted-skill block off its card and detail panel. */
   hideSkills: boolean;
   /** Fade a notification on its own rather than leaving it until dismissed. */

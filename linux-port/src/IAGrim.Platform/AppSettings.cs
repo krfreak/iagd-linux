@@ -124,6 +124,24 @@ public sealed class AppSettings : ICloudSettings {
     /// </summary>
     public bool PreferDelayedSearch { get; set; } = true;
 
+    /// <summary>
+    /// Whether the window opens minimized. Upstream's <c>StartMinimized</c>
+    /// (MinimizeToTrayHandler.cs:27), which sets its form to <c>FormWindowState.Minimized</c>
+    /// on load.
+    ///
+    /// Worth having here for the reason it exists there: this sits beside a fullscreen game and
+    /// is alt-tabbed to for a few seconds at a time, so being launched with the game — by a
+    /// startup entry, or a script that starts both — should not mean a window in the way.
+    ///
+    /// Upstream pairs it with <c>MinimizeToTray</c>, which additionally *hides* the window so
+    /// only the tray icon remains. That half is not here and cannot be: Photino exposes no
+    /// visibility control at all — the native library's entire window-state surface is
+    /// <c>Photino_GetMinimized</c> and <c>Photino_SetMinimized</c>. See BACKLOG entry 7. It
+    /// matters less here than it would there, because this port's tray icon is always present
+    /// where upstream's appears only once the window is gone.
+    /// </summary>
+    public bool StartMinimized { get; set; }
+
     // ------------------------------------------------------------------- online sync
     //
     // See ICloudSettings for what each of these means and which of upstream's two settings

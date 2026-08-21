@@ -196,6 +196,44 @@ internal static class Program {
 
         if (icon is not null) window.SetIconFile(icon);
 
+        // Whether the window is minimized, as far as this process knows.
+        //
+        // Tracked rather than asked, because PhotinoWindow.Minimized cannot be relied on: under
+        // a Wayland session it reads false however many times SetMinimized(true) has been called
+        // and whatever the window is actually doing. The tray toggle used to ask it, which on
+        // Wayland meant "restore" was unreachable — every click computed !false and minimized
+        // again. Under X11 the same getter is correct, so this was invisible to anyone testing
+        // there. The window's own events keep this honest when the state changes without us.
+        var minimized = false;
+
+        window.RegisterMinimizedHandler((_, _) => minimized = true);
+        window.RegisterRestoredHandler((_, _) => minimized = false);
+
+        // Opening minimized, for the case this setting exists to serve: the app launched
+        // alongside the game rather than instead of it.
+        //
+        // Set from the created handler because minimizing is a request to a window manager about
+        // a window that has to exist first. Verified under X11, where the window arrives with
+        // WM_STATE Iconic and _NET_WM_STATE_HIDDEN; a Wayland compositor may decline, and gives
+        // no way to find out that it has. Photino minimizes rather than hides — it has no API
+        // for hiding at all — so this leaves an entry in the taskbar, which is upstream's
+        // behaviour too whenever MinimizeToTray is off. See BACKLOG entry 7.
+        if (AppSettings.Load().StartMinimized) {
+            window.RegisterWindowCreatedHandler((_, _) => {
+                try {
+                    window.SetMinimized(true);
+                    minimized = true;
+                    // Said out loud because the alternative is an application that appears not to
+                    // have started. Someone who set this weeks ago and forgot has no other clue.
+                    Console.WriteLine("note: starting minimized; the tray icon brings the window back.");
+                }
+                catch (Exception ex) {
+                    // A window manager that refuses is not a reason to fail to start.
+                    Console.Error.WriteLine($"note: could not start minimized ({ex.Message}).");
+                }
+            });
+        }
+
         // A tray icon, where the desktop has somewhere to put one. Left-click toggles the
         // window, which is the whole feature: this sits beside a fullscreen game and gets
         // alt-tabbed to for a few seconds at a time.
@@ -207,7 +245,10 @@ internal static class Program {
             iconName: "iagd",
             title: "Item Assistant for Grim Dawn",
             onActivate: () => {
-                try { window.SetMinimized(!window.Minimized); }
+                try {
+                    minimized = !minimized;
+                    window.SetMinimized(minimized);
+                }
                 catch (Exception) { /* window already gone */ }
             }).GetAwaiter().GetResult();
 
