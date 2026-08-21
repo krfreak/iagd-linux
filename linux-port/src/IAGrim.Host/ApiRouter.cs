@@ -270,6 +270,98 @@ public sealed class ApiRouter {
                 return;
             }
 
+            // Upstream's ExportMode over ItemExport.Export, which is upstream's GDFileExporter —
+            // the GD Stash interchange format. That is the half of upstream's dialog this port
+            // can serve: it has no reader for upstream's own IAFileExporter (.ias) format, so
+            // there is no IA-format source to offer here without inventing one from nothing.
+            case ("POST", "/api/export"): {
+                var export = await ReadJsonAsync<ExportRequest>(context);
+                if (string.IsNullOrWhiteSpace(export?.Path)) {
+                    await Json_(context, new { error = "no file given" }, 400);
+                    return;
+                }
+
+                try {
+                    var count = IAGrim.Core.Backup.ItemExport.Export(
+                        LinuxPaths.DatabaseFile, export.Path, export.Hardcore, export.Mod);
+
+                    await Json_(context, new {
+                        count,
+                        // Hardcore and softcore are separate stashes in Grim Dawn, so a file that
+                        // mixes them produces an import nobody asked for on the other end. The
+                        // CLI carries the same warning for the same reason ('iagd export').
+                        warning = export.Hardcore is null && count > 0
+                            ? "This includes both hardcore and softcore items. They are separate "
+                              + "stashes in game — export softcore and hardcore separately if the "
+                              + "file is going back into one."
+                            : null,
+                    });
+                }
+                catch (Exception ex) {
+                    await Json_(context, new { error = ex.Message }, 500);
+                }
+                return;
+            }
+
+            // Upstream's ImportMode, restricted to the GD Stash radio button for the same reason
+            // export is: this port only has a reader for that format. The mod field matches the
+            // CLI's --mod, since the interchange format itself carries no mod — GDFileExporter
+            // never wrote one, so on the way back in it has to be told rather than read.
+            case ("POST", "/api/import"): {
+                var import = await ReadJsonAsync<ImportRequest>(context);
+                if (string.IsNullOrWhiteSpace(import?.Path)) {
+                    await Json_(context, new { error = "no file given" }, 400);
+                    return;
+                }
+                if (!File.Exists(import.Path)) {
+                    await Json_(context, new { error = $"no such file: {import.Path}" }, 400);
+                    return;
+                }
+
+                try {
+                    // Importing adds rows to the one thing that cannot be regenerated, so there
+                    // is something to go back to if the file turns out to hold the wrong
+                    // collection, or a stale one dragged out of a backup by mistake. Same rule
+                    // 'iagd import-file' follows.
+                    var safety = IAGrim.Core.Backup.DatabaseBackup
+                        .Create(LinuxPaths.DatabaseFile, LinuxPaths.BackupDir, "before-import");
+
+                    var (imported, skipped, refused) = IAGrim.Core.Backup.ItemExport
+                        .Import(LinuxPaths.DatabaseFile, import.Path, import.Mod);
+
+                    if (imported > 0) {
+                        // The same pass a merge triggers, and for the same reason: an imported
+                        // item has no rarity or rolled values until this runs, and without it the
+                        // new items sit grey and unfilterable until the next restart. The cheap
+                        // per-item passes inside it run synchronously here; the full precompute,
+                        // only if the collection actually needs it, continues in the background
+                        // and reports over the event socket the status poll already listens to —
+                        // there is no per-item progress to show for the import itself, since
+                        // ItemExport.Import has no callback and adding one would mean changing
+                        // the shared format code the CLI also relies on for one caller's UI.
+                        var gameDir = (_server?.Settings ?? AppSettings.Load()).GameDir ?? _paths?.GameDir;
+                        _ = StatRefresh.RunIfNeededAsync(LinuxPaths.DatabaseFile, gameDir, _events,
+                                                         cancellationToken);
+
+                        await _events.BroadcastAsync(
+                            HostEvent.Message($"Imported {imported:N0} item(s).", "info"), cancellationToken);
+                        await _events.BroadcastAsync(HostEvent.Status(CurrentStatus()), cancellationToken);
+                    }
+
+                    await Json_(context, new {
+                        imported, skipped, refused,
+                        backup = Path.GetFileName(safety.Path),
+                    });
+                }
+                catch (InvalidDataException ex) {
+                    await Json_(context, new { error = ex.Message }, 400);
+                }
+                catch (Exception ex) {
+                    await Json_(context, new { error = ex.Message }, 500);
+                }
+                return;
+            }
+
             // Upstream's "Load Database": read the game's data again on demand.
             // Opens one of the Support page's links in the user's browser.
             //

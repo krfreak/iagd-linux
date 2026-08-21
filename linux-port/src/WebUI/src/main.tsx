@@ -4,7 +4,7 @@ import {
   api, subscribe, ItemSummary, ItemCard as ItemCardData, ItemDetail, HostStatus, HostEvent,
   ItemFilters, RARITIES, LANGUAGE_NAMES,
   CollectionEntry, SetEntry, Settings, FilterCatalogue, FilterGroup, ModInfo, TransferTarget,
-  MergePreview, MergeProgressEvent, ItemStatLine,
+  MergePreview, MergeProgressEvent, ExportResult, ImportResult, ItemStatLine,
   CloudStatus, Buddy, BackedUpCharacter, CharacterBackupState,
 } from './api';
 import { GrimText, StatLine, stripGrimText } from './GrimText';
@@ -1149,10 +1149,13 @@ function SettingsView({ onSaved, progress, status }: {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [saving, setSaving] = useState(false);
   const [canBrowse, setCanBrowse] = useState(false);
+  const [mods, setMods] = useState<ModInfo[]>([]);
 
   useEffect(() => {
     api.settings().then(setSettings).catch(() => setSettings(null));
     api.canBrowse().then(setCanBrowse).catch(() => setCanBrowse(false));
+    // For the export branch dropdown below, same list the toolbar's mod selector uses.
+    api.mods().then(setMods).catch(() => {});
   }, []);
 
   if (!settings) return <div class="grid__empty">Loading settings…</div>;
@@ -1272,6 +1275,10 @@ function SettingsView({ onSaved, progress, status }: {
       </div>
 
       <MergeCollection canBrowse={canBrowse} progress={progress} />
+
+      <ExportCollection canBrowse={canBrowse} mods={mods} />
+
+      <ImportCollection canBrowse={canBrowse} />
 
       <div class="settings__group">
         <h3>Hook</h3>
@@ -1606,6 +1613,219 @@ function MergeCollection({ canBrowse, progress }: {
           {done.statsComputed !== null
             && ` Values computed for ${done.statsComputed.toLocaleString()} item(s).`}
           {done.statsNote && ` ${done.statsNote}`}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The dropdown value meaning "every branch", for the export selector below. */
+const EXPORT_ALL = 'all';
+
+/** The (hardcore, mod) an export selector value encodes — the inverse of building it. */
+function exportBranch(value: string): { hardcore: boolean | null; mod: string | null } {
+  if (value === EXPORT_ALL) return { hardcore: null, mod: null };
+  const [hc, ...rest] = value.split(':');
+  return { hardcore: hc === 'hc', mod: rest.join(':') };
+}
+
+/** A filename that says what is in the file, so two exports from the same session don't collide. */
+function defaultExportName(value: string): string {
+  if (value === EXPORT_ALL) return 'export.gds';
+  const { hardcore, mod } = exportBranch(value);
+  const modPart = mod ? mod.toLowerCase().replace(/\s+/g, '-') : 'vanilla';
+  return `${modPart}-${hardcore ? 'hardcore' : 'softcore'}.gds`;
+}
+
+/**
+ * Writing the collection, or one branch of it, to a file.
+ *
+ * Upstream's ExportMode offers "All items" or one mod/difficulty combination from the same
+ * dropdown the toolbar's branch selector uses (branchKey/branchLabel above), so this reuses it
+ * rather than inventing a second vocabulary for the same distinction. "All items" is not hidden
+ * — the CLI allows it too — but it is warned about, because hardcore and softcore are separate
+ * stashes in Grim Dawn and a file that mixes them is not one an import can safely put back
+ * without asking the same question this dialog already answered.
+ *
+ * Only the GD Stash (.gds) format: see ImportCollection below for why.
+ */
+function ExportCollection({ canBrowse, mods }: { canBrowse: boolean; mods: ModInfo[] }) {
+  const [branch, setBranch] = useState(EXPORT_ALL);
+  const [path, setPath] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<ExportResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const run = async () => {
+    setBusy(true);
+    setError(null);
+    setResult(null);
+    try {
+      const { hardcore, mod } = exportBranch(branch);
+      const outcome = await api.exportCollection(path, hardcore, mod);
+      if (outcome.error) setError(outcome.error); else setResult(outcome);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div class="settings__group">
+      <h3>Export the collection</h3>
+      <p class="settings__note">
+        Writes items to a GD Stash file (.gds) — the format the Grim Dawn tool ecosystem shares
+        collections in, and the same one <code>iagd export</code> writes.
+      </p>
+
+      <label class="settings__row">
+        <span>Items</span>
+        <select
+          class="filters__select"
+          value={branch}
+          disabled={busy}
+          onChange={(e) => setBranch((e.target as HTMLSelectElement).value)}
+        >
+          <option value={EXPORT_ALL}>All items</option>
+          {mods.map((m) => (
+            <option key={`${m.hardcore}:${m.name}`} value={`${m.hardcore ? 'hc' : 'sc'}:${m.name}`}>
+              {branchLabel(m)} — {m.items.toLocaleString()} item(s)
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <div class="settings__path">
+        <span>Save as</span>
+        <input
+          type="text"
+          value={path}
+          placeholder="/path/to/export.gds"
+          disabled={busy}
+          onInput={(e) => { setPath((e.target as HTMLInputElement).value); setResult(null); }}
+        />
+        {canBrowse && (
+          <button
+            class="button"
+            disabled={busy}
+            onClick={async () => {
+              // /api/browse has no "Save As" mode — only a folder chooser or an existing-file
+              // chooser (see the note on POST /api/browse in ApiRouter.cs) — so this picks the
+              // destination folder and fills in a name built from the selection above, which
+              // stays a plain text field the name part can still be edited in.
+              const folder = await api.browse({ directory: true, title: 'Choose where to save the export' });
+              if (folder) { setPath(`${folder.replace(/\/+$/, '')}/${defaultExportName(branch)}`); setResult(null); }
+            }}
+          >
+            Choose…
+          </button>
+        )}
+      </div>
+
+      <div class="settings__row">
+        <button class="button button--primary" disabled={busy || path.trim() === ''} onClick={run}>
+          {busy ? 'Exporting…' : 'Export'}
+        </button>
+      </div>
+
+      {error && <div class="settings__alert">{error}</div>}
+
+      {result && (
+        <div class="settings__alert settings__alert--warn">
+          Exported {result.count.toLocaleString()} item(s) to {path}.{result.warning && ` ${result.warning}`}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Reading a file into the collection.
+ *
+ * Upstream's ImportMode offers a second source, its own IA Stash (.ias) format, behind the same
+ * dialog. This port carries no reader for that format — ItemExport only implements the GD Stash
+ * interchange format upstream's GDFileExporter writes — so offering an IA Stash option here
+ * would be a button that always fails rather than a ported feature. Only GD Stash is offered.
+ */
+function ImportCollection({ canBrowse }: { canBrowse: boolean }) {
+  const [path, setPath] = useState('');
+  const [mod, setMod] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<ImportResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const run = async () => {
+    setBusy(true);
+    setError(null);
+    setResult(null);
+    try {
+      const outcome = await api.importCollection(path, mod.trim() === '' ? null : mod.trim());
+      if (outcome.error) setError(outcome.error); else setResult(outcome);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div class="settings__group">
+      <h3>Import a collection file</h3>
+      <p class="settings__note">
+        Reads a GD Stash file (.gds) into this collection, skipping items already present. A copy
+        of the collection is saved first. The file carries no mod of its own — name one below if
+        it came from a modded game, or leave it blank for vanilla.
+      </p>
+
+      <div class="settings__path">
+        <span>File</span>
+        <input
+          type="text"
+          value={path}
+          placeholder="/path/to/export.gds"
+          disabled={busy}
+          onInput={(e) => { setPath((e.target as HTMLInputElement).value); setResult(null); }}
+        />
+        {canBrowse && (
+          <button
+            class="button"
+            disabled={busy}
+            onClick={async () => {
+              const picked = await api.browse({ title: 'Choose a file to import' });
+              if (picked) { setPath(picked); setResult(null); }
+            }}
+          >
+            Choose…
+          </button>
+        )}
+      </div>
+
+      <label class="settings__row">
+        <span>Mod</span>
+        <input
+          type="text"
+          value={mod}
+          placeholder="(vanilla)"
+          disabled={busy}
+          onInput={(e) => setMod((e.target as HTMLInputElement).value)}
+        />
+      </label>
+
+      <div class="settings__row">
+        <button class="button button--primary" disabled={busy || path.trim() === ''} onClick={run}>
+          {busy ? 'Importing…' : 'Import'}
+        </button>
+      </div>
+
+      {error && <div class="settings__alert">{error}</div>}
+
+      {result && (
+        <div class="settings__alert settings__alert--warn">
+          Imported {result.imported.toLocaleString()} item(s); skipped {result.skipped.toLocaleString()} already
+          present{result.refused > 0
+            && `; ${result.refused.toLocaleString()} not collected (components, crafting materials, quest items and stacks)`}.
+          {result.backup && ` A copy of the previous collection was saved as ${result.backup}.`}
         </div>
       )}
     </div>

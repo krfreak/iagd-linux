@@ -39,8 +39,18 @@ public static class DatabaseBackup {
         var safeReason = new string(reason.Where(c => char.IsLetterOrDigit(c) || c is '-').ToArray());
         if (safeReason.Length == 0) safeReason = "manual";
 
-        var target = Path.Combine(
-            backupDir, $"userdata-{DateTime.Now:yyyyMMdd-HHmmss}-{safeReason}.db");
+        var stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+        var target = Path.Combine(backupDir, $"userdata-{stamp}-{safeReason}.db");
+
+        // Two backups within the same second — a merge immediately followed by an import, a
+        // script running the CLI twice back to back — would otherwise collide on this filename.
+        // VACUUM INTO refuses to write over an existing file, so the second backup would throw
+        // before it copied anything, and the operation it was meant to protect would fail with
+        // an opaque SQLite error instead of getting the copy it asked for.
+        var suffix = 1;
+        while (File.Exists(target)) {
+            target = Path.Combine(backupDir, $"userdata-{stamp}-{safeReason}-{++suffix}.db");
+        }
 
         using (var connection = new SqliteConnection($"Data Source={databasePath}")) {
             connection.Open();

@@ -230,6 +230,19 @@ public sealed record MergeRequest(string? Path = null, bool DryRun = true);
 /// <param name="Directory">Choose a folder rather than a file.</param>
 public sealed record BrowseRequest(bool Directory = false, string? Title = null, string? Path = null);
 
+/// <param name="Hardcore">
+/// True for hardcore only, false for softcore only, null for both — which is allowed, but
+/// answered with a warning, since they are separate stashes in game.
+/// </param>
+/// <param name="Mod">Restricts the export to one mod branch; null exports every mod.</param>
+public sealed record ExportRequest(string? Path = null, bool? Hardcore = null, string? Mod = null);
+
+/// <param name="Mod">
+/// The mod to attribute the imported items to. The interchange format carries no mod of its
+/// own, so this is the only way to say — matching the CLI's 'import-file --mod'.
+/// </param>
+public sealed record ImportRequest(string? Path = null, string? Mod = null);
+
 public sealed record TransferRequest(int TimeoutSeconds = 120, bool Keep = false,
                                      string? TargetMod = null, bool? TargetHardcore = null);
 

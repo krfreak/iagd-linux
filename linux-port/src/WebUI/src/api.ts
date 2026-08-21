@@ -331,6 +331,22 @@ export interface MergeProgressEvent {
   message: string | null;
 }
 
+export interface ExportResult {
+  count: number;
+  /** Set when neither hardcore nor softcore was chosen — the file mixes two separate stashes. */
+  warning: string | null;
+  error?: string;
+}
+
+export interface ImportResult {
+  imported: number;
+  skipped: number;
+  refused: number;
+  /** Filename of the safety copy taken before the import. */
+  backup: string | null;
+  error?: string;
+}
+
 /**
  * One card in the item list.
  *
@@ -581,6 +597,28 @@ export const api = {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ path, dryRun }),
     }).then(json<MergePreview & { error?: string }>),
+
+  /**
+   * Writes the collection, or the branch given, to a GD Stash interchange file.
+   *
+   * Uses jsonOrError rather than json: a bad path or an unwritable folder is something the user
+   * just typed, not a fetch failure, and the panel wants the host's own sentence for it rather
+   * than a bare "400 Bad Request".
+   */
+  exportCollection: (path: string, hardcore: boolean | null, mod: string | null) =>
+    fetch('/api/export', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path, hardcore, mod }),
+    }).then(jsonOrError<ExportResult>),
+
+  /** Reads a GD Stash interchange file into the collection, skipping items already present. */
+  importCollection: (path: string, mod: string | null) =>
+    fetch('/api/import', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path, mod }),
+    }).then(jsonOrError<ImportResult>),
 
   sets: (query?: string) => {
     const params = new URLSearchParams();
