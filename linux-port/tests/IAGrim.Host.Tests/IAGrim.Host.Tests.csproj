@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>IAGrim.Host.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <!--
+    ApiRouter itself dispatches on a real HttpListenerContext, which nothing outside HttpListener
+    can construct — so it is not what these test. What is worth testing are the two decisions
+    that sit behind two of its routes: whether a pair of stash tabs is safe to save together
+    (StashTabGuard), and which names /api/open-folder is allowed to resolve (KnownFolders). Both
+    are plain static logic, deliberately pulled out of ApiRouter's switch so they can be checked
+    without a server, a listener, or the settings file on this machine.
+  -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../src/IAGrim.Host/IAGrim.Host.csproj" />
+    <ProjectReference Include="../../src/IAGrim.Platform/IAGrim.Platform.csproj" />
+  </ItemGroup>
+
+</Project>

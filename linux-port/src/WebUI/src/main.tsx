@@ -1342,7 +1342,42 @@ function SettingsView({ onSaved, progress, status }: {
         </p>
       </div>
 
+      <BackupFolder onOpened={onSaved} />
+
     </section>
+  );
+}
+
+/**
+ * Upstream's Settings tab has an "Open Data Folder" button (SettingsController.cs); this is its
+ * counterpart, pointed at the one thing this port keeps there worth finding — a database backup
+ * taken before every risky operation (import, merge, stash import, first opening someone else's
+ * collection). There is no "View Logs" alongside it: this port logs to stdout/stderr rather
+ * than a file, so there is nothing for that button to open.
+ */
+function BackupFolder({ onOpened }: { onOpened: (message: string) => void }) {
+  return (
+    <div class="settings__group">
+      <h3>Backups</h3>
+      <p class="settings__note">
+        A copy of the collection database, saved before an import, a merge, a stash import, or
+        opening an existing collection for the first time. <code>iagd backup</code> lists them
+        from a terminal; this opens the folder they live in.
+      </p>
+      <button
+        class="button"
+        onClick={async () => {
+          const result = await api.openFolder('backups');
+          // No xdg-open, or no desktop session: there is no file manager to hand this to, so
+          // the path is shown as text instead — the same fallback Support.tsx uses for links.
+          if (!result.opened) {
+            onOpened(result.path ? `Backups are in ${result.path}` : (result.error ?? 'Could not open the backup folder.'));
+          }
+        }}
+      >
+        Open backup folder
+      </button>
+    </div>
   );
 }
 

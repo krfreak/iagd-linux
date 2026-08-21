@@ -1,3 +1,5 @@
+using IAGrim.Platform;
+
 namespace IAGrim.Host;
 
 /// <summary>
@@ -190,6 +192,36 @@ public static class SupportLinks {
     private static readonly HashSet<string> Allowed = [Website, Source, Patreon, Port, PortIssues];
 
     public static bool Contains(string url) => Allowed.Contains(url);
+}
+
+/// <summary>A named directory the Settings page asks the host to open. Only <see cref="KnownFolders"/>.</summary>
+public sealed record OpenFolderRequest(string? Name = null);
+
+/// <summary>
+/// Directories <c>/api/open-folder</c> is allowed to open, named rather than accepting a path.
+///
+/// <c>/api/open</c> is allowlisted to a fixed set of URLs for the reason spelled out on that
+/// case in ApiRouter: the host listens on 127.0.0.1:5680, a browser is a supported way to reach
+/// it, and any page it has open can call this endpoint. A folder opener that took a path would
+/// be the same "launch anything on the host" primitive with different plumbing — worse, even,
+/// since a directory reaches everything under it. So this takes a name instead, the way the
+/// link opener takes one of a fixed set of URLs.
+///
+/// The one folder worth reaching this way: upstream has "Open Data Folder" and "View Logs"
+/// buttons on its Settings tab (SettingsController.cs), and this port has a genuine counterpart
+/// only for the first — it writes a database backup before every risky operation (import,
+/// merge, stash import, first opening someone else's collection) and otherwise offers no way to
+/// find them but the XDG layout. There is no log folder to add alongside it: this port logs to
+/// stdout/stderr rather than a file, so a "View Logs" button would have nothing to point at.
+/// </summary>
+public static class KnownFolders {
+    public const string Backups = "backups";
+
+    /// <summary>The path for a known name, or null when the name is not one of them.</summary>
+    public static string? Resolve(string name) => name switch {
+        Backups => LinuxPaths.BackupDir,
+        _ => null,
+    };
 }
 
 /// <param name="DryRun">Report what would happen without writing anything.</param>

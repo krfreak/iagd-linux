@@ -586,6 +586,21 @@ export const api = {
       body: JSON.stringify({ url }),
     }).then(json<{ opened: boolean; error?: string }>),
 
+  /**
+   * Asks the host to open one of the directories it knows about by name — currently just
+   * "backups", where a copy of the collection database is saved before anything that could
+   * lose data. Named rather than a path for the same reason `open` above is allowlisted to a
+   * fixed set of URLs: the endpoint is reachable by any page a browser has open while the
+   * client is running. `path` comes back either way, so the page can show it as text when
+   * there is nothing to hand it to.
+   */
+  openFolder: (name: string) =>
+    fetch('/api/open-folder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    }).then(json<{ opened: boolean; error?: string; path?: string }>),
+
   item: (id: number) => fetch(`/api/items/${id}`).then(json<ItemDetail>),
 
   /**
