@@ -706,6 +706,7 @@ public sealed class ApiRouter {
             settings.PrefixDir,
             settings.TransferAnyMod,
             settings.AutoAttach,
+            settings.HideSkills,
             settings.DatabaseFile,
             databaseInUse = LinuxPaths.DatabaseFile,
             availableLanguages = languages,

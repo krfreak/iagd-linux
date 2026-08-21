@@ -247,12 +247,13 @@ function replicaRows(stats: ItemStatLine[]): ItemStatLine[] {
   });
 }
 
-function ItemCard({ card, selected, onSelect, onTransfer, transferring }: {
+function ItemCard({ card, selected, onSelect, onTransfer, transferring, hideSkills }: {
   card: ItemCardData;
   selected: boolean;
   onSelect: () => void;
   onTransfer: (all: boolean) => void;
   transferring: boolean;
+  hideSkills: boolean;
 }) {
   const { item, stats, skill, copies } = card;
   const icon = api.iconUrl(item.icon);
@@ -302,7 +303,7 @@ function ItemCard({ card, selected, onSelect, onTransfer, transferring }: {
           ))}
         </ul>
 
-        {skill && (
+        {skill && !hideSkills && (
           <div class="item__skill">
             <div class="item__skill-name">{skill.name ?? 'Granted Skill'}</div>
             {skill.description && <div class="item__skill-text">{skill.description}</div>}
@@ -1290,6 +1291,18 @@ function SettingsView({ onSaved, progress, status }: {
       </div>
 
       <div class="settings__group">
+        <h3>Interface</h3>
+        <label class="settings__row settings__row--check">
+          <input
+            type="checkbox" disabled={saving}
+            checked={settings.hideSkills}
+            onChange={(e) => save({ hideSkills: (e.target as HTMLInputElement).checked })}
+          />
+          <span>Hide an item's granted skill on its card and detail panel</span>
+        </label>
+      </div>
+
+      <div class="settings__group">
         <h3>Paths</h3>
         <p class="settings__note">
           The collection can live anywhere — including an existing Item Assistant database from a
@@ -1617,7 +1630,7 @@ interface TransferState {
   pending: boolean;
 }
 
-function ItemPanel({ id, transfer, onSend, onCancel, onClose, mods, allowRetarget }: {
+function ItemPanel({ id, transfer, onSend, onCancel, onClose, mods, allowRetarget, hideSkills }: {
   id: number;
   transfer: TransferState | undefined;
   onSend: (id: number, target?: TransferTarget) => void;
@@ -1625,6 +1638,7 @@ function ItemPanel({ id, transfer, onSend, onCancel, onClose, mods, allowRetarge
   onClose: () => void;
   mods: ModInfo[];
   allowRetarget: boolean;
+  hideSkills: boolean;
 }) {
   const [detail, setDetail] = useState<ItemDetail | null>(null);
   // Undefined means "wherever the item came from", which is what upstream does when its
@@ -1661,7 +1675,7 @@ function ItemPanel({ id, transfer, onSend, onCancel, onClose, mods, allowRetarge
             same tooltip twice on one screen is how the old overlay earned its reputation. What
             is here is what the card cannot do — choosing where an item goes, and following the
             transfer once it is queued. */}
-        {detail.skill && (
+        {detail.skill && !hideSkills && (
           <div class="skill">
             <div class="skill__head">
               <span class="skill__name">{detail.skill.name ?? 'Grants a skill'}</span>
@@ -1759,6 +1773,8 @@ function App() {
   const [mods, setMods] = useState<ModInfo[]>([]);
   // Choosing a target stash is gated on the same setting upstream gates its stash picker with.
   const [allowRetarget, setAllowRetarget] = useState(false);
+  // Whether the granted-skill block is left off a card and its detail panel.
+  const [hideSkills, setHideSkills] = useState(false);
   const [items, setItems] = useState<ItemCardData[]>([]);
   const [total, setTotal] = useState(0);
   // Cards are what the list pages through; items are what the window reports. Identical items
@@ -1862,7 +1878,10 @@ function App() {
         });
       })
       .catch(() => {});
-    api.settings().then((s) => setAllowRetarget(s.transferAnyMod)).catch(() => {});
+    api.settings().then((s) => {
+      setAllowRetarget(s.transferAnyMod);
+      setHideSkills(s.hideSkills);
+    }).catch(() => {});
 
     return subscribe((event: HostEvent) => {
       switch (event.type) {
@@ -2136,6 +2155,7 @@ function App() {
                           onSelect={() => setSelected(card.item.id)}
                           onTransfer={(all) => transferFromCard(card, all)}
                           transferring={Boolean(transfers[card.item.id]?.pending)}
+                          hideSkills={hideSkills}
                         />
                       ))}
                       {items.length < total && (
@@ -2166,6 +2186,7 @@ function App() {
                 onClose={() => setSelected(null)}
                 mods={mods}
                 allowRetarget={allowRetarget}
+                hideSkills={hideSkills}
                 transfer={transfers[selected]}
                 onSend={async (id, target) => {
                   setTransfers((c) => ({

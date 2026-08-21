@@ -391,6 +391,8 @@ export interface Settings {
   transferAnyMod: boolean;
   /** Attach the hook automatically when Grim Dawn is detected. */
   autoAttach: boolean;
+  /** Leave an item's granted-skill block off its card and detail panel. */
+  hideSkills: boolean;
   /** A chosen collection database, or null for the default location. */
   databaseFile: string | null;
   /** The database actually open, whichever way it was chosen. */

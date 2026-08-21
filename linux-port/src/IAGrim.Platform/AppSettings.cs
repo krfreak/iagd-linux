@@ -80,6 +80,19 @@ public sealed class AppSettings : ICloudSettings {
     /// </summary>
     public bool TransferAnyMod { get; set; }
 
+    /// <summary>
+    /// Whether an item's granted-skill block is left off its card and detail panel. Upstream's
+    /// <c>HideSkills</c>, bound to the "Hide Skills" checkbox in its settings window and applied
+    /// by skipping <c>ApplySkills</c> in ItemStatService.
+    ///
+    /// Upstream's own default hides the block on a fresh install — its backing field defaults to
+    /// true, not false. This port has never had the toggle at all and has always drawn the
+    /// block, so copying that default would silently hide skills for every existing user the
+    /// moment they update. Defaulting to false keeps what they already see; the box is there for
+    /// anyone who wants upstream's default instead.
+    /// </summary>
+    public bool HideSkills { get; set; }
+
     // ------------------------------------------------------------------- online sync
     //
     // See ICloudSettings for what each of these means and which of upstream's two settings
