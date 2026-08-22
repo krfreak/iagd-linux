@@ -470,6 +470,22 @@ export const LANGUAGE_NAMES: Record<string, string> = {
 };
 
 /**
+ * The importer keeps a copy of every loot file it consumes, and deletes them after a few days.
+ * This is that directory: what is in it, and how much of it the next sweep would take.
+ */
+export interface LootBackup {
+  path: string;
+  files: number;
+  bytes: number;
+  /** Files past the retention — what a sweep would delete right now. */
+  expired: number;
+  expiredBytes: number;
+  retentionDays: number;
+  /** How many this request deleted; null when nothing was asked for. */
+  removed: number | null;
+}
+
+/**
  * Online backup, as the panel sees it.
  *
  * `state` has three values, not two. "unknown" means the service could not be reached — which is
@@ -660,6 +676,18 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name }),
     }).then(json<{ opened: boolean; error?: string; path?: string }>),
+
+  /** What the loot-file directory holds, without changing it. */
+  lootBackup: () => fetch('/api/loot-backup').then(json<LootBackup>),
+
+  /**
+   * Deletes the loot files that have outlived the retention, and answers with what is left.
+   *
+   * The same sweep the host runs when it starts, not a second policy: the panel exists because
+   * the directory is otherwise invisible, not to offer a different rule for it.
+   */
+  pruneLootBackup: () =>
+    fetch('/api/loot-backup/prune', { method: 'POST' }).then(json<LootBackup>),
 
   item: (id: number) => fetch(`/api/items/${id}`).then(json<ItemDetail>),
 

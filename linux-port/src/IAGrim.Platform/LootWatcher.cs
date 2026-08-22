@@ -141,6 +141,53 @@ public sealed class LootWatcher : IDisposable {
     /// </summary>
     public static readonly TimeSpan BackupRetention = TimeSpan.FromDays(3);
 
+    /// <summary>What the backup directory is holding right now.</summary>
+    /// <param name="Expired">
+    /// How much of it a sweep would take. Shown before the button is pressed, because "delete
+    /// 460 of 884 files" is a decision and "clean up" on its own is not.
+    /// </param>
+    public sealed record BackupUsage(string Path, int Files, long Bytes, int Expired, long ExpiredBytes);
+
+    /// <summary>
+    /// Counts the directory without changing it, for the Settings page's cleanup panel.
+    ///
+    /// Deliberately not folded into <c>/api/settings</c>: walking the whole directory is the
+    /// expensive part, and the settings page loads on every visit while this is asked for once
+    /// per panel.
+    /// </summary>
+    public static BackupUsage InspectBackups(string? backupDir = null, TimeSpan? retention = null) {
+        var directory = backupDir ?? LinuxPaths.LootBackupDir;
+        var cutoff = DateTime.Now - (retention ?? BackupRetention);
+        var files = 0;
+        var expired = 0;
+        long bytes = 0;
+        long expiredBytes = 0;
+
+        try {
+            foreach (var path in Directory.EnumerateFiles(directory, "*.csv")) {
+                try {
+                    var info = new FileInfo(path);
+                    var length = info.Length;
+                    files++;
+                    bytes += length;
+
+                    if (info.LastWriteTime <= cutoff) {
+                        expired++;
+                        expiredBytes += length;
+                    }
+                }
+                catch (IOException) {
+                    // Deleted between the listing and the stat; it is not there to report.
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) {
+            // Same as the sweep below: no directory yet, or not ours to read.
+        }
+
+        return new BackupUsage(directory, files, bytes, expired, expiredBytes);
+    }
+
     /// <summary>
     /// Deletes loot files kept past <see cref="BackupRetention"/>, and returns how many.
     ///
@@ -150,6 +197,10 @@ public sealed class LootWatcher : IDisposable {
     /// equivalent directory once when it starts, and so does this: callers run it at startup,
     /// not per pass, because the host builds a new <see cref="LootWatcher"/> every two seconds
     /// and re-walking the directory that often is the cost this is meant to avoid.
+    ///
+    /// The Settings page can also ask for it on demand (<c>POST /api/loot-backup/prune</c>),
+    /// which is the same sweep with the same three days rather than a second policy — someone
+    /// who has just noticed the directory should not have to restart the client to empty it.
     /// </summary>
     public static int PruneBackups(string? backupDir = null, TimeSpan? retention = null) {
         var directory = backupDir ?? LinuxPaths.LootBackupDir;

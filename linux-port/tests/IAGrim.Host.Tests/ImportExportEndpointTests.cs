@@ -22,6 +22,7 @@ namespace IAGrim.Host.Tests;
 /// <c>XDG_DATA_HOME</c> and <c>XDG_CONFIG_HOME</c> at its own temp directory before the router is
 /// built, so a run of this suite never touches a real collection or a real settings.json.
 /// </summary>
+[Collection(XdgSuites.Name)]
 public sealed class ImportExportEndpointTests : IDisposable {
     private readonly string _dataDir = Path.Combine(Path.GetTempPath(), $"iagd-ie-data-{Guid.NewGuid():N}");
     private readonly string _configDir = Path.Combine(Path.GetTempPath(), $"iagd-ie-config-{Guid.NewGuid():N}");

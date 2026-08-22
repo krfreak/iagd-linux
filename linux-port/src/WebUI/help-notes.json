@@ -66,7 +66,7 @@
       "tag": "LinuxPaths",
       "title": "Where does this port keep things?",
       "type": "none",
-      "html": "<ul><li><i>~/.local/share/iagd-linux/userdata.db</i> — the collection, in upstream's schema</li><li><i>~/.local/share/iagd-linux/backup</i> — automatic copies, taken before a merge or a parse</li><li><i>~/.local/share/iagd-linux/storage</i> — item icons, extracted from the game</li></ul>The client writes its log to the terminal it was started from rather than to a file."
+      "html": "<ul><li><i>~/.local/share/iagd-linux/userdata.db</i> — the collection, in upstream's schema</li><li><i>~/.local/share/iagd-linux/backup</i> — automatic copies, taken before a merge or a parse</li><li><i>~/.local/share/iagd-linux/storage</i> — item icons, extracted from the game</li><li><i>~/.local/share/iagd-linux/loot-backup</i> — one file per looted item, kept for three days after the item is stored; Settings has a button to clear the old ones now</li></ul>The client writes its log to the terminal it was started from rather than to a file."
     },
     {
       "tag": "LinuxNotImplemented",

@@ -1014,6 +1014,19 @@ overwrite" but "never overwrite something different" — `BackupTarget` compares
 the name when they match, and takes a `-conflict.csv` name when they do not. Loot files are one
 item each, so reading both in full to decide costs nothing.
 
+**The Settings panel is this port's own, and deliberately so.** Upstream has no "clean up loot
+files" button because upstream has nothing to clean — it deletes a consumed CSV immediately and
+its startup sweep handles the few it keeps. This port keeps every consumed file for three days,
+so it has a directory upstream does not have, and a directory nothing in the client mentioned:
+the person who reported this found it with `du`. That is the whole justification for the panel —
+it makes a port-only side effect visible and gives it an off switch — and it is why the button
+runs the *same* three-day sweep rather than offering a "delete everything" that would be a
+second retention policy. `GET /api/loot-backup` reports what a sweep would take before it is
+offered — "887 file(s), 3.5 MB — 884 older than 3 days (3.5 MB)" — and
+`POST /api/loot-backup/prune` performs it. Verified by driving the real page in a headless
+browser against a real host: 460 stale files seeded, one click, all 460 gone and the panel
+re-reading itself down to "3 file(s), 18 B — none older than the retention".
+
 ### Filtering by mastery
 
 Ticking Occultist returned items with no Occultist line on them — 336 of them in this

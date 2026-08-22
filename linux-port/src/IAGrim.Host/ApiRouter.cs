@@ -406,6 +406,23 @@ public sealed class ApiRouter {
                 return;
             }
 
+            // The looted-item files the importer has already consumed, and the sweep that
+            // clears the ones that have outlived their purpose.
+            //
+            // The sweep runs itself at startup (LootImporter) — this is the same one, on
+            // demand, with the same three-day cutoff rather than a second policy. It exists
+            // because the directory was invisible: it is not the backup folder, nothing in the
+            // client mentioned it, and an installation used for months quietly accumulates a
+            // file per looted item there. GET reports what a sweep would take before it is
+            // asked for; POST performs it and reports what is left.
+            case ("GET", "/api/loot-backup"):
+                await Json_(context, LootBackupStatus());
+                return;
+
+            case ("POST", "/api/loot-backup/prune"):
+                await Json_(context, LootBackupStatus(LootWatcher.PruneBackups()));
+                return;
+
             case ("POST", "/api/parse"): {
                 var parse = await ReadJsonAsync<ParseRequest>(context);
                 var settings = _server?.Settings ?? AppSettings.Load();
@@ -870,6 +887,26 @@ public sealed class ApiRouter {
     }
 
     /// <summary>
+    /// What the Settings page's cleanup panel shows, before and after a sweep.
+    /// </summary>
+    /// <param name="removed">
+    /// Files this request deleted, or null when nothing was asked for — the difference between
+    /// "0 removed" and "not asked", which the panel words differently.
+    /// </param>
+    private static object LootBackupStatus(int? removed = null) {
+        var usage = LootWatcher.InspectBackups();
+        return new {
+            path = usage.Path,
+            files = usage.Files,
+            bytes = usage.Bytes,
+            expired = usage.Expired,
+            expiredBytes = usage.ExpiredBytes,
+            retentionDays = (int)LootWatcher.BackupRetention.TotalDays,
+            removed,
+        };
+    }
+
+    /// <summary>
     /// Scopes a search to one mod and one hardcore branch, which is the only kind of search
     /// upstream can run.
     ///
@@ -1000,6 +1037,8 @@ public sealed class ApiRouter {
           GET  /api/browse                is a native file chooser available
           POST /api/browse                {directory, title, path} -> chosen path
           POST /api/open-folder           {name} -> opens a known directory (backups)
+          GET  /api/loot-backup           consumed loot files kept, and how many are stale
+          POST /api/loot-backup/prune     delete the stale ones now
           POST /api/merge                 {path, dryRun} -> merge another collection in
           GET  /api/settings              settings, and what the hook actually sees
           PUT  /api/settings              {stashToLootFrom, stashToDepositTo, language, gameDir}

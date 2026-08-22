@@ -5,7 +5,7 @@ import {
   ItemFilters, RARITIES, LANGUAGE_NAMES,
   CollectionEntry, SetEntry, Settings, FilterCatalogue, FilterGroup, ModInfo, TransferTarget,
   MergePreview, MergeProgressEvent, ExportResult, ImportResult, ItemStatLine,
-  CloudStatus, Buddy, BackedUpCharacter, CharacterBackupState,
+  CloudStatus, Buddy, BackedUpCharacter, CharacterBackupState, LootBackup,
 } from './api';
 import { GrimText, StatLine, stripGrimText } from './GrimText';
 import { Help } from './Help';
@@ -1409,6 +1409,8 @@ function SettingsView({ onSaved, progress, status }: {
 
       <BackupFolder onOpened={onSaved} />
 
+      <LootFiles onSwept={onSaved} />
+
     </section>
   );
 }
@@ -1444,6 +1446,95 @@ function BackupFolder({ onOpened }: { onOpened: (message: string) => void }) {
       </button>
     </div>
   );
+}
+
+/**
+ * The loot files the importer has already consumed, and the sweep that clears the stale ones.
+ *
+ * Upstream has no counterpart button, because upstream has nothing to clean: it deletes a
+ * looted CSV as soon as the item is stored and only keeps refused duplicates, which its own
+ * startup sweep clears after three days. This port keeps every consumed file for those same
+ * three days, which is a directory that grows all through a play session and that nothing in
+ * the client otherwise mentions — the reason this panel exists is that the first person to find
+ * it found it with `du`, not here.
+ *
+ * The button runs the *same* sweep the host runs at startup, deliberately: an on-demand "delete
+ * everything" would be a second retention policy, and a file kept for three days is the only
+ * record of an item the game has already given away.
+ */
+function LootFiles({ onSwept }: { onSwept: (message: string) => void }) {
+  const [state, setState] = useState<LootBackup | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [swept, setSwept] = useState<LootBackup | null>(null);
+
+  useEffect(() => { api.lootBackup().then(setState).catch(() => setState(null)); }, []);
+
+  const sweep = async () => {
+    setBusy(true);
+    try {
+      const result = await api.pruneLootBackup();
+      setState(result);
+      setSwept(result);
+    } catch (e) {
+      onSwept(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div class="settings__group">
+      <h3>Looted item files</h3>
+      <p class="settings__note">
+        The hook writes one file per looted item, and a copy is kept for{' '}
+        {state ? state.retentionDays : 3} days after the item is safely in the collection — long
+        enough to be the last word on an item the game has already handed over. Older ones are
+        deleted when the client starts; this does it now.
+      </p>
+
+      {state && (
+        <p class="settings__note">
+          {state.files === 0
+            ? 'Nothing kept right now.'
+            : `${state.files.toLocaleString()} file(s), ${formatBytes(state.bytes)} — `
+              + (state.expired === 0
+                ? 'none older than the retention.'
+                : `${state.expired.toLocaleString()} older than ${state.retentionDays} days `
+                  + `(${formatBytes(state.expiredBytes)}).`)}
+          {' '}<code>{state.path}</code>
+        </p>
+      )}
+
+      <div class="settings__row">
+        <button
+          class="button"
+          disabled={busy || state === null || state.expired === 0}
+          onClick={sweep}
+        >
+          {busy ? 'Deleting…'
+            : state && state.expired > 0
+              ? `Delete ${state.expired.toLocaleString()} old file(s)`
+              : 'Nothing to delete'}
+        </button>
+      </div>
+
+      {swept && (
+        <div class="settings__alert settings__alert--warn">
+          {swept.removed === 0
+            ? 'Nothing was old enough to delete.'
+            : `Deleted ${swept.removed?.toLocaleString()} file(s).`}
+          {swept.files > 0 && ` ${swept.files.toLocaleString()} still kept, ${formatBytes(swept.bytes)}.`}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Sizes for a directory listing: whole KB and one decimal of MB, which is all this is read for. */
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024).toLocaleString()} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 /**
