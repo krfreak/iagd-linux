@@ -39,6 +39,16 @@ internal static class LootImporter {
         // how the same twenty items ended up being asked for every two seconds.
         var replicas = bridge is null ? null : new ReplicaService(bridge);
 
+        // Every item ever looted leaves a copy of its CSV behind, and until now nothing removed
+        // any of them. Swept once per run rather than per pass, because the loop below builds a
+        // new LootWatcher every two seconds. Runs without a prefix too: the directory is ours,
+        // and files left by earlier sessions should go whether or not loot can arrive now.
+        var pruned = LootWatcher.PruneBackups();
+        if (pruned > 0) {
+            Console.WriteLine($"removed {pruned} looted item file(s) kept longer than "
+                              + $"{LootWatcher.BackupRetention.TotalDays:0} days");
+        }
+
         // The hook's own channel. Emptied every pass because nothing else does: these files are
         // written by the DLL and never cleaned up, and an install that has been used for a few
         // days accumulates hundreds. See HookMessageQueue.

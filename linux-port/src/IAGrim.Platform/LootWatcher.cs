@@ -81,17 +81,98 @@ public sealed class LootWatcher : IDisposable {
     /// <summary>
     /// Removes the file from the queue once it is safely in the database — but keeps a copy.
     /// The item exists nowhere else at this point: the hook already took it out of the game.
+    /// The copy is not kept forever; see <see cref="PruneBackups"/>.
     /// </summary>
     private void Consume(string file) {
         try {
             Directory.CreateDirectory(_backupDir);
-            var destination = Path.Combine(_backupDir, Path.GetFileName(file));
+            var destination = BackupTarget(file, _backupDir);
             File.Copy(file, destination, overwrite: true);
             File.Delete(file);
         }
         catch (IOException) {
             // Left in place; the next pass will see it as a duplicate and retry the move.
         }
+    }
+
+    /// <summary>
+    /// Where a consumed loot file is copied to, avoiding the one case where the obvious answer
+    /// loses an item.
+    ///
+    /// The hook names files at random (<c>HookDll/Hook/InventorySack_AddItem.cpp</c>,
+    /// <c>randomFilename</c>) rather than after anything about the item, so a name already in
+    /// the backup directory is nearly always this same file's earlier copy — <c>File.Copy</c>
+    /// succeeded on an earlier pass and the <c>File.Delete</c> after it did not. Overwriting
+    /// that is correct and is why the copy is unconditional rather than skipped.
+    ///
+    /// A name that is already here holding *different* bytes is a different item, and
+    /// overwriting it would destroy the only record that it ever existed. Upstream has the same
+    /// case and answers it the same way, with a distinct name rather than a clobber
+    /// (<c>CsvParsingService.Handle</c>, the <c>-conflict.csv</c> branch).
+    /// </summary>
+    public static string BackupTarget(string file, string backupDir) {
+        var destination = Path.Combine(backupDir, Path.GetFileName(file));
+
+        if (File.Exists(destination) && !SameContent(file, destination)) {
+            return Path.Combine(backupDir,
+                                $"{Path.GetFileNameWithoutExtension(file)}-{Guid.NewGuid():N}-conflict.csv");
+        }
+
+        return destination;
+    }
+
+    /// <summary>Whole-file comparison, which loot files are small enough for — one item.</summary>
+    private static bool SameContent(string a, string b) {
+        try {
+            return new FileInfo(a).Length == new FileInfo(b).Length
+                && File.ReadAllBytes(a).AsSpan().SequenceEqual(File.ReadAllBytes(b));
+        }
+        catch (IOException) {
+            return false;   // unreadable counts as different: a new name keeps both
+        }
+    }
+
+    /// <summary>
+    /// How long a consumed loot file is kept. Upstream's own number for the same files
+    /// (<c>CsvParsingService.Start</c> deletes anything in <c>ingoing/deleted</c> more than
+    /// three days old), and this port is already more generous than upstream in what it puts
+    /// there: upstream deletes a successfully looted file outright and only keeps refused
+    /// duplicates.
+    /// </summary>
+    public static readonly TimeSpan BackupRetention = TimeSpan.FromDays(3);
+
+    /// <summary>
+    /// Deletes loot files kept past <see cref="BackupRetention"/>, and returns how many.
+    ///
+    /// Nothing else empties this directory, and every item that has ever been looted passes
+    /// through it — a collection built up over a few months leaves tens of thousands of files
+    /// behind, each one a copy of a row the database already has. Upstream sweeps the
+    /// equivalent directory once when it starts, and so does this: callers run it at startup,
+    /// not per pass, because the host builds a new <see cref="LootWatcher"/> every two seconds
+    /// and re-walking the directory that often is the cost this is meant to avoid.
+    /// </summary>
+    public static int PruneBackups(string? backupDir = null, TimeSpan? retention = null) {
+        var directory = backupDir ?? LinuxPaths.LootBackupDir;
+        var cutoff = DateTime.Now - (retention ?? BackupRetention);
+        var removed = 0;
+
+        try {
+            foreach (var file in Directory.EnumerateFiles(directory, "*.csv")) {
+                try {
+                    if (File.GetLastWriteTime(file) > cutoff) continue;
+                    File.Delete(file);
+                    removed++;
+                }
+                catch (IOException) {
+                    // Gone or held open; the next run sweeps it.
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) {
+            // No backup directory yet, or not ours to read. Nothing to clean up either way.
+        }
+
+        return removed;
     }
 
     public void Dispose() { }

@@ -98,7 +98,10 @@ public static class LinuxPaths {
     /// <summary>Item icons extracted from the game's ARC files.</summary>
     public static string IconDir => Ensure(Path.Combine(DataDir, "storage"));
 
-    /// <summary>Copies of loot CSVs, kept until they are safely in the database.</summary>
+    /// <summary>
+    /// Copies of loot CSVs, kept for a few days after they are safely in the database — see
+    /// <see cref="LootWatcher.PruneBackups"/>, which is the only thing that empties this.
+    /// </summary>
     public static string LootBackupDir => Ensure(Path.Combine(DataDir, "loot-backup"));
 
     /// <summary>

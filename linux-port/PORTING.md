@@ -977,7 +977,42 @@ Worth stating plainly, because it decides how the whole feature reads: **a refus
 real item leaving the game**. The hook has already taken it out of the stash by the time the host
 sees the file. Upstream keeps the CSV (`ingoing/deleted`), this port keeps it in
 `~/.local/share/iagd-linux/loot-backup`, and either way the copy on disk is the only record that
-it existed.
+it existed — for three days, which is how long upstream keeps its copy and now how long this
+keeps its own. See below.
+
+### The loot backup was write-only
+
+Every file the importer consumed was copied into `loot-backup` under the name the hook gave it,
+with `overwrite: true`, and nothing ever deleted one. Two problems, both reported from a real
+install and both of which upstream had already answered in `CsvParsingService`.
+
+**It grew without limit.** Every item that has ever been looted leaves a file behind, so the
+directory is a running total of the collection rather than a queue: 884 files here after a few
+months of ordinary play, 460 of them older than three days, and an installation used for a year
+is in the tens of thousands. Upstream never accumulates them — in a release build it *deletes* a
+successfully looted CSV outright, and only a refused duplicate is kept at all — and it sweeps the
+directory it does keep when it starts, deleting anything more than three days old
+(`CsvParsingService.Start`).
+
+`LootWatcher.PruneBackups` is that sweep, with upstream's three days, which leaves this port
+still more generous than upstream about what it keeps. Called at startup by the host and by
+`iagd import` and `iagd watch` — **not per pass**, which is the trap: `LootImporter` builds a new
+`LootWatcher` every two seconds, so anything in the constructor would re-walk the whole directory
+every two seconds, and walking a 20,000-file directory is exactly the cost being avoided.
+
+**And a collision would have destroyed an item.** The hook names loot files at random
+(`randomFilename`: 32 characters shuffled out of an alphabet of 62), so two names colliding is
+vanishingly unlikely — but `overwrite: true` meant that if it ever happened, the file already
+there would go, and for a refused duplicate that file is the only evidence the item existed.
+Upstream has the same case in the same directory and does not clobber: it moves the newcomer to
+`<guid>-conflict.csv` instead.
+
+What made this less obvious than upstream's version is that here the overwrite is also *load
+bearing*: `Consume` copies and then deletes, and if the delete fails the next pass sees the same
+file again and must be free to write over its own earlier copy. So the rule is not "never
+overwrite" but "never overwrite something different" — `BackupTarget` compares the bytes, keeps
+the name when they match, and takes a `-conflict.csv` name when they do not. Loot files are one
+item each, so reading both in full to decide costs nothing.
 
 ### Filtering by mastery
 

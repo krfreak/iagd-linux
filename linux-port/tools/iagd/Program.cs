@@ -121,10 +121,24 @@ internal static class Program {
         return 0;
     }
 
+    /// <summary>
+    /// The startup sweep of consumed loot files, the same one the host does. Every looted item
+    /// leaves a copy behind and nothing else deletes them, so whichever way the importer is
+    /// started has to clear the ones that have outlived their purpose.
+    /// </summary>
+    private static void PruneLootBackups() {
+        var pruned = LootWatcher.PruneBackups();
+        if (pruned > 0) {
+            Console.WriteLine($"Removed {pruned} looted item file(s) kept longer than "
+                              + $"{LootWatcher.BackupRetention.TotalDays:0} days.");
+        }
+    }
+
     private static int Import() {
         var (_, bridge) = Resolve();
         using var store = new LootStore(LinuxPaths.DatabaseFile);
         var watcher = new LootWatcher(bridge, store);
+        PruneLootBackups();
 
         var results = watcher.ImportPending();
         if (results.Count == 0) {
@@ -158,6 +172,7 @@ internal static class Program {
         var (_, bridge) = Resolve();
         using var store = new LootStore(LinuxPaths.DatabaseFile);
         var watcher = new LootWatcher(bridge, store);
+        PruneLootBackups();
 
         watcher.OnImported += result => {
             var stamp = DateTime.Now.ToString("HH:mm:ss");

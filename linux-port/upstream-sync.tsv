@@ -23,6 +23,7 @@ HookDll/Hook/OnDemandSeedInfo.cpp	patches/hook/OnDemandSeedInfo.cpp.patch	Item s
 HookDll/Hook/Exports.h	native/hook/generated/Exports.h  (used unmodified)	Mangled game export names; changes on most GD patches
 HookDll/Hook/MessageType.h	tools/probe/MessageTypes.cs	Message type enum shared with the host
 IAGrim/Services/CsvParsingService.cs	src/IAGrim.Platform/LootCsv.cs	Loot CSV column order and accepted column counts
+IAGrim/Services/CsvParsingService.cs	src/IAGrim.Platform/LootWatcher.cs	Consumed loot file lifecycle: conflict rename, three-day sweep
 Parser/Arc/DDSImageReader.cs	src/IAGrim.Core/Imaging/DdsIconExtractor.cs	DDS/DXT decode; forked only to replace System.Drawing
 Parser/Arc/DDSHeader.cs	src/IAGrim.Core/Imaging/DDSHeader.cs	DDS header parsing (internal upstream, so copied)
 Parser/Arc/DDSPixelFormat.cs	src/IAGrim.Core/Imaging/DDSPixelFormat.cs	DDS pixel format (internal upstream, so copied)
